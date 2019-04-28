@@ -1,0 +1,13 @@
+{
+    "app":{
+        "base_url": "https://genius.com/albums/"
+    },
+    "Game_of_Thrones":{
+        "extension": "Season-{}-scripts",
+        "seasons": 7
+    },
+    "The_Office":{
+        "extension": "Season-{}",
+        "seasons": 2
+    }
+}
