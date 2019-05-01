@@ -8,19 +8,16 @@ Created on Tue Dec 11 01:29:33 2018
 """Use My Own Kick Ass Algorithm to Extract Keyphrases"""
 from nltk.tokenize import word_tokenize
 import nltk
+nltk.download('punkt')
 nltk.download('stopwords')
-
+import networkx as nx
 import pickle
 import pandas as pd 
-
 import inflect
-
 from collections import Counter
 import re
 import numpy as np
 from Scraper import Genius_TV_Scraper
-
-import networkx as nx
 
 # return second element of tuple within a list
 def second(elem):
@@ -386,13 +383,11 @@ class MyAlgo(object):
         for i in range(len(self.stat_ranking)):
             for key, val in self.stat_ranking[i].items():
                 self.stat_ranking[i][key]=val*PFO_factor[key]*tl_factor[key]
-            self.stat_ranking[i] = sort_dict(self.stat_ranking[i[:self.take_top]])
+            self.stat_ranking[i] = sort_dict(self.stat_ranking[i])[:self.take_top]
+            self.stat_ranking[i] = {key:value for key,value in self.stat_ranking[i]}
             
     def graph(self):
-#        node2word_dicts=[]
-        graph_list=[]
-        y=lambda x: x[0]
-        
+        graph_list = []
         for i in range(len(self.stat_ranking)):
             
 #            doc_dict={}
@@ -404,18 +399,22 @@ class MyAlgo(object):
 #            node2word_dicts.append(doc_dict)
             
             ranking = self.stat_ranking[i]
-            words = [y(x) for x in ranking]
-            gram_lists = []
-            for i in [1].extend(self.grams):
-                gramz = [word for word in words if len(re.findall("_", word))==i-1]
+            words = list(ranking.keys())
+            words2 = [x.split("_") for x in words]
+            print(words)
             G=nx.Graph()
             G.add_nodes_from(words)
             
             #get edges of graphs
+            edge_df=pd.DataFrame(index=words, columns=words)
+            for word in words2:
             
             graph_list.append(G)
             
-            
-
-#if __name__ == "__main__":
-    
+if __name__ == "__main__":
+    with open('examples.pkl', 'rb') as f:
+        docs = pickle.load(f)
+    x=MyAlgo(docs=docs, ngrams=[1,2])
+    x.stats()
+    print(x.tokenized_docs[2])
+    x.graph()
