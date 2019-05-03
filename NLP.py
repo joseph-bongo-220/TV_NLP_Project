@@ -5,7 +5,7 @@ Created on Tue Dec 11 01:29:33 2018
 @author: Joe
 """
 
-"""Use My Own Kick Ass Algorithm to Extract Keyphrases"""
+"""Use My Own Algorithm to Extract Keyphrases"""
 from nltk.tokenize import word_tokenize
 import nltk
 nltk.download('punkt')
@@ -18,6 +18,8 @@ from collections import Counter
 import re
 import numpy as np
 from Scraper import Genius_TV_Scraper
+import math
+import sys
 
 # return second element of tuple within a list
 def second(elem):
@@ -33,7 +35,60 @@ def flatten(x):
 def sort_dict(dict_unsorted):
     dict_sorted = sorted(dict_unsorted.items(), key=lambda x: x[1], reverse=True)
     return dict_sorted
-    
+
+def get_inds_for_gram(word, tokenized_doc):
+    split_=word.split("_")
+    grams=[]
+    for wordy in split_:
+        grams.append([i for i,e in enumerate(tokenized_doc) if re.search(wordy, tokenized_doc[i]) is not None])
+
+    inds=[]
+    for j in grams[0]:
+        temp = [j]
+        for i in range(len(grams)-1):
+            if j+i+1 in grams[i+1]:
+                temp.append(j+i+1)
+        if len(temp)==len(grams):
+            inds.append(temp)
+    return inds
+
+def smallest_distance(list1, list2):
+    a = 0
+    b = 0
+    distance = sys.maxsize 
+    while (a < len(list1) and b < len(list2)): 
+        if (abs(list1[a] - list2[b]) < distance): 
+            distance = abs(list1[a] - list2[b]) 
+        if (list1[a] < list2[b]): 
+            a += 1
+        else: 
+            b += 1 
+    return distance
+
+def get_edge_weights(wi_dict, cutoff):
+    edge_df=pd.DataFrame(index=list(wi_dict.keys()), columns=list(wi_dict.keys()))
+    for word, indices in wi_dict.items():
+        for word2, indices2 in wi_dict.items():
+            dists = []
+            if math.isnan(edge_df[word2][word])==False or word==word2:
+                pass 
+            else:
+                len_word=len(re.findall("_",word))
+                len_word2=len(re.findall("_",word2))
+                ngram_factor = max([len([x for x in word.split("_") if x not in word2.split("_")]), len([x for x in word2.split("_") if x not in word.split("_")])])
+                for x in wi_dict[word]:
+                    dists.extend([smallest_distance(x,y)+ngram_factor for y in wi_dict[word2] if smallest_distance(x,y) < cutoff and smallest_distance(x,y)!=0])
+                num=0
+                if len(dists)==0:
+                    edge_df[word][word2]=0
+                    edge_df[word2][word]=0
+                else:
+                    for dist in dists:
+                        num=num+np.log(cutoff/dist)
+                    edge_df[word][word2]=num/len(dists)
+                    edge_df[word2][word]=0
+    return edge_df
+
 def pickle_data_frames():
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
     GOT_Scraper = Genius_TV_Scraper(show='Game of thrones')
@@ -189,7 +244,6 @@ def subsum_correction(tf_dict_list):
                     tf_dict[word]=tf_dict[word]-tf_dict[key]
                 
     return tf_dict_list
-    
         
 class MyAlgo(object):
     def __init__(self, docs, ngrams=[1,2,3,4,5,6], cutoff=1000, take_top=50):
@@ -290,6 +344,7 @@ class MyAlgo(object):
                 "where'd": "where did",
                 "where's": "where is",
                 "where've": "where have",
+                "who'd": "who had",
                 "who'll": "who will",
                 "who'll've": "who will have",
                 "who's": "who is",
@@ -387,34 +442,36 @@ class MyAlgo(object):
             self.stat_ranking[i] = {key:value for key,value in self.stat_ranking[i]}
             
     def graph(self):
-        graph_list = []
-        for i in range(len(self.stat_ranking)):
-            
-#            doc_dict={}
-#        
-#            for j in range(self.take_top):
-#                x={self.stat_ranking[i][j][0]:j+1}
-#                doc_dict.update(x)
-#                
-#            node2word_dicts.append(doc_dict)
-            
+        self.pagerank_list = []
+        for i in range(len(self.stat_ranking)):        
             ranking = self.stat_ranking[i]
+            doc = self.tokenized_docs[i]
             words = list(ranking.keys())
-            words2 = [x.split("_") for x in words]
-            print(words)
             G=nx.Graph()
             G.add_nodes_from(words)
             
             #get edges of graphs
-            edge_df=pd.DataFrame(index=words, columns=words)
-            for word in words2:
-            
-            graph_list.append(G)
-            
+            indices_dict={}
+            for word in words:
+                indices_dict.update({word:get_inds_for_gram(word, doc)})
+
+            weights_df=get_edge_weights(indices_dict, self.cutoff)
+            for word1 in words:
+                for word2 in words:
+                    if weights_df[word1][word2]==0 or math.isnan(weights_df[word1][word2]):
+                        pass
+                    else:
+                        G.add_edge(word1, word2, weight=weights_df[word1][word2]*ranking[word1]*ranking[word2])
+            pr=nx.pagerank(G) 
+            pr_sorted=sort_dict(pr)
+            self.pagerank_list.append({key:value for key,value in pr_sorted})
+        for i in self.pagerank_list:
+            print(i)
+            print("*"*30)
+
 if __name__ == "__main__":
     with open('examples.pkl', 'rb') as f:
         docs = pickle.load(f)
     x=MyAlgo(docs=docs, ngrams=[1,2])
     x.stats()
-    print(x.tokenized_docs[2])
     x.graph()
