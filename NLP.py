@@ -19,27 +19,41 @@ import math
 import sys
 from helper import second, flatten, sort_dict, smallest_distance
 from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions
+from app_config import get_config
+
+config = get_config()
 
 def pickle_data_frames():
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
     GOT_Scraper = Genius_TV_Scraper(show='Game of thrones')
     GOT_data = GOT_Scraper.get_scripts()
+    GOT_path = config["Game_of_Thrones"]["pickle_path"]
     GOT_data.to_pickle('GOT_Pickle.pkl')
+
     Office_Scraper = Genius_TV_Scraper(show='The office us')
     Office_data = Office_Scraper.get_scripts()
+    Office_path = config["The_Office"]["pickle_path"]
     Office_data.to_pickle('Office_Pickle.pkl')
 
-def process_episodes(show, seasons=None):
+def process_episodes(show, seasons=None, Pickle=False):
+    if Pickle:
+        if show == "Game of thrones":
+            pickle_path = config["Game_of_Thrones"]["pickle_path"]
+        elif show == "The office us":   
+            pickle_path = config["The_Office"]["pickle_path"]
+        with open(pickle_path, 'rb') as f:
+            data = pickle.load(f)
 
-    # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
-    scraper = Genius_TV_Scraper(show=show, seasons=seasons)
+    else:
+        # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
+        scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
-    #scrape previously specified show and seasons
-    data = scraper.get_scripts()
+        #scrape previously specified show and seasons
+        data = scraper.get_scripts()
 
     #get episodes from data
-    z = [sorted(data["Episode"], key=data["Episode"].count, reverse=True)[0]]
-    for i in sorted(data["Episode"], key=data["Episode"].count, reverse=True):
+    z = []
+    for i in list(data["Episode"]):
         if i not in z:
             z.append(i)
     
@@ -47,42 +61,52 @@ def process_episodes(show, seasons=None):
     for episode in z:
         df = data[data.Episode == episode]
         doc = " ".join(list(df["Line"]))
-        docs = docs.append(doc)
+        doc_dict = {episode: doc}
+        docs.append(doc_dict)
 
     return docs
 
-def process_characters(show, seasons=None, num_char=10):
+def process_characters(show, seasons=None, num_char=10, Pickle=False):
+    if Pickle:
+        if show == "Game of thrones":
+            pickle_path = config["Game_of_Thrones"]["pickle_path"]
+        elif show == "The office us":   
+            pickle_path = config["The_Office"]["pickle_path"]
+        with open(pickle_path, 'rb') as f:
+            data = pickle.load(f)
 
-    # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
-    scraper = Genius_TV_Scraper(show=show, seasons=seasons)
+    else:
+        # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
+        scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
-    # scrape previously specified show and seasons
-    data = scraper.get_scripts()
-
-    z = [sorted(data["Character_Name"], key=data["Character_Name"].count, reverse=True)[0]]
-    for i in sorted(data["Character_Name"], key=data["Character_Name"].count, reverse=True):
+        #scrape previously specified show and seasons
+        data = scraper.get_scripts()
+    
+    #get characters from data
+    z = []
+    for i in list(data["Character_Name"]):
         if i not in z:
             z.append(i)
 
+    docs=[]
     for char in z[0:num_char]:
         df = data[data.Character_Name == char]
         char_text = " ".join(list(df["Line"]))
-        doc = textacy.Doc(char_text, lang=u'en')
+        doc_dict = {char: char_text}
         docs.append(doc)
-    corpus = textacy.Corpus(lang=u'en', docs=docs)
-    idf_dict = corpus.word_doc_freqs(normalize=None, weighting="idf", as_strings=True)
 
-    return docs, idf_dict
+    return docs
 
-class MyAlgo(object):
+class JBRank(object):
     def __init__(self, docs, ngrams=[1,2,3,4,5,6], cutoff=1000, take_top=50):
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
+        self.doc_titles=[]
     
-        for doc in docs:
-            # Handle contractions
-            #CODE
+        for doc_dict in docs:
+            self.doc_titles.append(list(doc_dict.keys())[0])
+            doc = list(doc_dict.values())[0]
             doc = doc.lower()
             
             for x in list(cList.keys()):
@@ -144,8 +168,8 @@ class MyAlgo(object):
             self.stat_ranking[i] = sort_dict(self.stat_ranking[i])[:self.take_top]
             self.stat_ranking[i] = {key:value for key,value in self.stat_ranking[i]}
             
-    def graph(self):
-        self.pagerank_list = []
+    def graph(self, measure="pagerank"):
+        self.final_rankings = {}
         for i in range(len(self.stat_ranking)):        
             ranking = self.stat_ranking[i]
             doc = self.tokenized_docs[i]
@@ -165,12 +189,14 @@ class MyAlgo(object):
                         pass
                     else:
                         G.add_edge(word1, word2, weight=weights_df[word1][word2]*ranking[word1]*ranking[word2])
-            pr=nx.pagerank(G) 
-            pr_sorted=sort_dict(pr)
-            self.pagerank_list.append({key:value for key,value in pr_sorted})
-        for i in self.pagerank_list:
-            print(i)
-            print("*"*30)
+            if measure == "pagerank":
+                gr_dict=nx.pagerank(G)
+            elif measure == "betweenness centrality":
+                gr_dict=nx.betweenness_centrality(G, weight="weight")
+            elif measure == "load centrality":
+                gr_dict=nx.load_centrality(G, weight="weight")
+            gr_dict_sorted=sort_dict(gr_dict)
+            self.final_rankings.update({self.doc_titles[i]: {key:value for key,value in gr_dict_sorted}})
 
     def get_inds_for_gram(self, word, tokenized_doc):
         split_=word.split("_")
@@ -278,7 +304,6 @@ class MyAlgo(object):
 if __name__ == "__main__":
     with open('examples.pkl', 'rb') as f:
         docs = pickle.load(f)
-    x=MyAlgo(docs=docs, ngrams=[1,2])
+    x=JBRank(docs=docs, ngrams=[1,2])
     x.stats()
     x.graph()
-    print(docs)

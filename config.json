@@ -1,13 +1,22 @@
 {
     "app":{
-        "base_url": "https://genius.com/albums/"
+        "base_url": "https://genius.com/albums/",
+        "cutoff": 1000,
+        "ngrams": [1,2],
+        "take_top": 50,
+        "num_characters": 12,
+        "measure": "pagerank",
+        "pickle": true,
+        "json": false
     },
     "Game_of_Thrones":{
         "extension": "Season-{}-scripts",
-        "seasons": 7
+        "seasons": 7,
+        "pickle_path": "GOT_Pickle.pkl"
     },
     "The_Office":{
         "extension": "Season-{}",
-        "seasons": 2
+        "seasons": 2,
+        "pickle_path": "Office_Pickle.pkl"
     }
 }
