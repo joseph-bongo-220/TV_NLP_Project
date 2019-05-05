@@ -5,13 +5,14 @@ import requests
 import re
 import pandas as pd
 import json
+from app_config import get_config
+
+config = get_config()
 
 class Genius_TV_Scraper(object):
     """This object scrapes Genius for scipts to game of thrones and the office"""
     def __init__(self, show, seasons=None):
         """Initialize Seasons and URLs with error handling"""
-        with open('data.json') as f:
-            config = json.load(f)
 
         # base url should be placed in a config file
         base_url = config["app"]["base_url"]
@@ -58,6 +59,7 @@ class Genius_TV_Scraper(object):
     #fix issues with list comprehensions
     def get_scripts(self, json=False):
         """Get the scripts and return them as dataframes or JSON"""
+        temp_show = re.sub(" ", "-", self.show)
         show_df = pd.DataFrame()
 
         for url in self.urls:
@@ -69,7 +71,7 @@ class Genius_TV_Scraper(object):
 
             for link in links:
                 # use regex  and re.sub to extract episode from URL (THE OFFICE)
-                pattern = re.compile("(?<=https://genius.com/Game-of-thrones-)(.*)(?=-annotated)")
+                pattern = re.compile("(?<=https://genius.com/"+temp_show+"-)(.*)(?=-annotated)")
                 match = re.search(pattern, link)
                 episode = match.group(0)
                 episode = re.sub("-", " ", episode)
