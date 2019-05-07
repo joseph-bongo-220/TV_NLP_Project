@@ -20,27 +20,28 @@ import sys
 from helper import second, flatten, sort_dict, smallest_distance
 from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions
 from app_config import get_config
+import os
 
 config = get_config()
 
-def pickle_data_frames():
+def pickle_data_frames(show):
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
-    GOT_Scraper = Genius_TV_Scraper(show='Game of thrones')
-    GOT_data = GOT_Scraper.get_scripts()
-    GOT_path = config["Game_of_Thrones"]["pickle_path"]
-    GOT_data.to_pickle('GOT_Pickle.pkl')
+    pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
+    path = config[show]["pickle_path"]
 
-    Office_Scraper = Genius_TV_Scraper(show='The office us')
-    Office_data = Office_Scraper.get_scripts()
-    Office_path = config["The_Office"]["pickle_path"]
-    Office_data.to_pickle('Office_Pickle.pkl')
+    if path in pickle_files:
+        pass
+    else:
+        Scraper = Genius_TV_Scraper(show=show)
+        data = Scraper.get_scripts()
+        data.to_pickle(path)
 
 def process_episodes(show, seasons=None, Pickle=False):
     if Pickle:
         if show == "Game of thrones":
-            pickle_path = config["Game_of_Thrones"]["pickle_path"]
+            pickle_path = config["Game of thrones"]["pickle_path"]
         elif show == "The office us":   
-            pickle_path = config["The_Office"]["pickle_path"]
+            pickle_path = config["The office us"]["pickle_path"]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
 
@@ -301,9 +302,13 @@ class JBRank(object):
                     
         return tf_dict_list
 
+    def run(self):
+        self.stats()
+        measure = config["app"]["measure"]
+        self.graph(measure=measure)
+
 if __name__ == "__main__":
     with open('examples.pkl', 'rb') as f:
         docs = pickle.load(f)
     x=JBRank(docs=docs, ngrams=[1,2])
-    x.stats()
-    x.graph()
+    x.run()
