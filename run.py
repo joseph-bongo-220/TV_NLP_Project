@@ -3,6 +3,8 @@ from NLP import JBRank
 import json
 from app_config import get_config
 from Scraper import Genius_TV_Scraper
+import pickle
+from Scraper import correct_characters
 
 config = get_config()
 

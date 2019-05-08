@@ -38,10 +38,7 @@ def pickle_data_frames(show):
 
 def process_episodes(show, seasons=None, Pickle=False):
     if Pickle:
-        if show == "Game of thrones":
-            pickle_path = config["Game of thrones"]["pickle_path"]
-        elif show == "The office us":   
-            pickle_path = config["The office us"]["pickle_path"]
+        pickle_path = config[show]["pickle_path"]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
 
@@ -69,10 +66,7 @@ def process_episodes(show, seasons=None, Pickle=False):
 
 def process_characters(show, seasons=None, num_char=10, Pickle=False):
     if Pickle:
-        if show == "Game of thrones":
-            pickle_path = config["Game_of_Thrones"]["pickle_path"]
-        elif show == "The office us":   
-            pickle_path = config["The_Office"]["pickle_path"]
+        pickle_path = config[show]["pickle_path"]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
 
