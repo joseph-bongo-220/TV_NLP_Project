@@ -6,6 +6,7 @@ import re
 import pandas as pd
 import json
 from app_config import get_config
+from fuzzywuzzy import fuzz
 
 config = get_config()
 
@@ -142,7 +143,15 @@ def correct_characters(df, show, min_match=config["app"]["min_fuzzy_matching_rat
                 for i in list(df["Character_Name"].loc[df["Character_Name"]==name].index):
                     df["Narration"][i]=df["Line"][i]
                     df["Line"][i] = ""
-            # impliment some fuzzy matching on the names
             df["Character_Name"].loc[df["Character_Name"]==name]=key
     
+    char_list = [x for x in character_dict.keys() if x !=""]
+    min_fuzz = config["app"]["min_fuzzy_matching_ratio"]
+    min_partial_fuzz = config["app"]["min_partial_fuzzy_matching_ratio"]
+    for char_name in char_list:
+        for name in list({x for x in df["Character_Name"] if x!="" and x not in list(character_dict.keys())}):
+            if fuzz.ratio(char_name, name) >= min_fuzz:
+                df["Character_Name"].loc[df["Character_Name"]==name]=char_name
+            elif fuzz.partial_ratio(char_name+" ", name) >= min_partial_fuzz or fuzz.partial_ratio(" "+char_name, name) >= min_partial_fuzz:
+                df["Character_Name"].loc[df["Character_Name"]==name]=char_name
     return df

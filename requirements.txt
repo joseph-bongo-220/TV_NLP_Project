@@ -7,3 +7,4 @@ beautifulsoup4==4.7.1
 inflect
 tensorflow
 tensorflow_hub
+fuzzywuzzy==0.17.0

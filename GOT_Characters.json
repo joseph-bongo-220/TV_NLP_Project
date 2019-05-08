@@ -24,5 +24,13 @@
     "BRAN": ["BRAN'S VOICE"],
     "SAM": ["SAMWELL", "SAM TARLY","SAMWELL TARLY"],
     "CERSEI": ["CERSEI LANNISTER", "CERSEI BARATHEON", "CERSI"],
-    "GREY WORM": ["GREYWORM"]
+    "GREY WORM": ["GREYWORM"],
+    "SANSA": [],
+    "THEON":["REEK"],
+    "CATELYN":[],
+    "STANNIS":[],
+    "RENLY":[],
+    "MARGAERY":[],
+    "LORAS":[],
+    "ROBERT":[]
 }
