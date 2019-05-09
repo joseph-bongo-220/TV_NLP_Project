@@ -9,15 +9,26 @@ from Scraper import correct_characters
 config = get_config()
 
 if __name__ == '__main__':
-    NLP.pickle_data_frames("Game of thrones")
+    show="Game of thrones"
     pick = config["app"]["pickle"]
-    episodes = NLP.process_episodes("Game of thrones", Pickle=pick)
-
-    print(episodes)
+    episodes = NLP.process_episodes(show, Pickle=pick)
 
     ngrams = config["app"]["ngrams"]
-    X=JBRank(docs=episodes, ngrams=ngrams)
-    X.run()
+    ep_rank=JBRank(docs=episodes, ngrams=ngrams)
+    ep_rank.run()
 
-    for i in list(X.final_rankings.keys()):
-        print(X.final_rankings[i])
+    for i in list(ep_rank.final_rankings.keys()):
+        print(i)
+        print(ep_rank.final_rankings[i])
+
+    print ("*"*50)
+
+    num_char = config[show]["num_characters"]
+    characters=NLP.process_characters(show, num_char=num_char, Pickle=pick)
+
+    char_rank=JBRank(docs=characters, ngrams=ngrams)
+    char_rank.run()
+
+    for i in list(char_rank.final_rankings.keys()):
+        print(i)
+        print(char_rank.final_rankings[i])
