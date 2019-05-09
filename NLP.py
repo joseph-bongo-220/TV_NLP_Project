@@ -15,36 +15,37 @@ from collections import Counter
 import re
 import numpy as np
 from Scraper import Genius_TV_Scraper
+from Scraper import correct_characters
 import math
 import sys
 from helper import second, flatten, sort_dict, smallest_distance
 from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions
 from app_config import get_config
+import os
 
 config = get_config()
 
-def pickle_data_frames():
+def pickle_data_frames(show):
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
-    GOT_Scraper = Genius_TV_Scraper(show='Game of thrones')
-    GOT_data = GOT_Scraper.get_scripts()
-    GOT_path = config["Game_of_Thrones"]["pickle_path"]
-    GOT_data.to_pickle('GOT_Pickle.pkl')
+    pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
+    path = config[show]["pickle_path"]
 
-    Office_Scraper = Genius_TV_Scraper(show='The office us')
-    Office_data = Office_Scraper.get_scripts()
-    Office_path = config["The_Office"]["pickle_path"]
-    Office_data.to_pickle('Office_Pickle.pkl')
+    if path in pickle_files:
+        pass
+    else:
+        Scraper = Genius_TV_Scraper(show=show)
+        data = Scraper.get_scripts()
+        data.to_pickle(path)
 
 def process_episodes(show, seasons=None, Pickle=False):
     if Pickle:
-        if show == "Game of thrones":
-            pickle_path = config["Game_of_Thrones"]["pickle_path"]
-        elif show == "The office us":   
-            pickle_path = config["The_Office"]["pickle_path"]
+        print("Pulling Pickle Data")
+        pickle_path = config[show]["pickle_path"]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
 
     else:
+        print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
@@ -52,6 +53,8 @@ def process_episodes(show, seasons=None, Pickle=False):
         data = scraper.get_scripts()
 
     #get episodes from data
+    data=correct_characters(data, show)
+    
     z = []
     for i in list(data["Episode"]):
         if i not in z:
@@ -66,16 +69,15 @@ def process_episodes(show, seasons=None, Pickle=False):
 
     return docs
 
-def process_characters(show, seasons=None, num_char=10, Pickle=False):
+def process_characters(show, seasons=None, num_char=50, Pickle=False):
     if Pickle:
-        if show == "Game of thrones":
-            pickle_path = config["Game_of_Thrones"]["pickle_path"]
-        elif show == "The office us":   
-            pickle_path = config["The_Office"]["pickle_path"]
+        print("Pulling Pickle Data")
+        pickle_path = config[show]["pickle_path"]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
 
     else:
+        print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
@@ -83,22 +85,24 @@ def process_characters(show, seasons=None, num_char=10, Pickle=False):
         data = scraper.get_scripts()
     
     #get characters from data
-    z = []
-    for i in list(data["Character_Name"]):
-        if i not in z:
-            z.append(i)
+    data=correct_characters(data, show)
+
+    remove_char=config[show]["remove_chars"]
+    char_list = [x for x in data["Character_Name"] if x not in remove_char]
+    char_counter=Counter(char_list)
+    z = [x[0] for x in sorted(char_counter.items(), key=lambda x: x[1], reverse=True)][0:num_char]
 
     docs=[]
-    for char in z[0:num_char]:
+    for char in z:
         df = data[data.Character_Name == char]
         char_text = " ".join(list(df["Line"]))
         doc_dict = {char: char_text}
-        docs.append(doc)
+        docs.append(doc_dict)
 
     return docs
 
 class JBRank(object):
-    def __init__(self, docs, ngrams=[1,2,3,4,5,6], cutoff=1000, take_top=50):
+    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50):
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
@@ -116,7 +120,6 @@ class JBRank(object):
             doc = re.sub("g'", "good ", doc)
             doc = re.sub("m'", "my ", doc)
             doc = re.sub("d'", "do ", doc)
-            doc = re.sub("'s", " is", doc)
             
             # Tokenize document
             word_list = word_tokenize(doc)
@@ -146,18 +149,19 @@ class JBRank(object):
         
         self.tf_idf_list = self.get_TFIDF_info(tf_dicts=self.TF_list, idf_dict=IDF_list)
         
-        self.cutoff=cutoff
+        self.position_cutoff=position_cutoff
+        self.graph_cutoff=graph_cutoff
         self.take_top=take_top
         
     def stats(self):
         PFO_factor={}
         tl_factor={}
         for doc in self.tokenized_docs:
-            PFO_factor.update(self.get_PFO(doc, self.cutoff))
+            PFO_factor.update(self.get_PFO(doc, self.position_cutoff))
             tl_factor.update(self.get_TL(doc))
             for size in self.grams:
                 tokenized_ngrams = ["_".join(doc[x:x+size]) for x in range(len(doc)) if len(doc[x:x+size])== size]
-                PFO_factor.update(self.get_PFO(tokenized_ngrams, self.cutoff))
+                PFO_factor.update(self.get_PFO(tokenized_ngrams, self.position_cutoff))
                 tl_factor.update(self.get_TL(tokenized_ngrams))
                 
         self.stat_ranking= self.tf_idf_list.copy()
@@ -182,7 +186,7 @@ class JBRank(object):
             for word in words:
                 indices_dict.update({word:self.get_inds_for_gram(word, doc)})
 
-            weights_df=self.get_edge_weights(indices_dict, self.cutoff)
+            weights_df=self.get_edge_weights(indices_dict, self.graph_cutoff)
             for word1 in words:
                 for word2 in words:
                     if weights_df[word1][word2]==0 or math.isnan(weights_df[word1][word2]):
@@ -254,7 +258,7 @@ class JBRank(object):
         idf_list=dict(Counter(term_list))
         
         for key, val in idf_list.items():
-            if len(re.findall("_", key))==0:
+            if len(re.findall("_", key))<2:
                 idf_list[key] = np.log(len(list_of_bows)/val)
                 
             else:
@@ -301,9 +305,13 @@ class JBRank(object):
                     
         return tf_dict_list
 
+    def run(self):
+        self.stats()
+        measure = config["app"]["measure"]
+        self.graph(measure=measure)
+
 if __name__ == "__main__":
     with open('examples.pkl', 'rb') as f:
         docs = pickle.load(f)
     x=JBRank(docs=docs, ngrams=[1,2])
-    x.stats()
-    x.graph()
+    x.run()

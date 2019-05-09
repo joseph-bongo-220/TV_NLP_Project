@@ -6,6 +6,7 @@ import re
 import pandas as pd
 import json
 from app_config import get_config
+from fuzzywuzzy import fuzz
 
 config = get_config()
 
@@ -28,8 +29,8 @@ class Genius_TV_Scraper(object):
 
         if show == "Game of thrones":
             # GOT extension should be put in config file
-            extension = config["Game_of_Thrones"]["extension"]
-            GOT_season = config["Game_of_Thrones"]["seasons"]
+            extension = config["Game of thrones"]["extension"]
+            GOT_season = config["Game of thrones"]["seasons"]
             if seasons is None:
                 seasons = range(1,GOT_season+1)
             for i in seasons:
@@ -37,8 +38,8 @@ class Genius_TV_Scraper(object):
                     raise ValueError("Episodes from Game of Thrones seasons 1-7 are available on Genius.")
         elif show == "The office us":
             # Office extension should be put in config file
-            extension = config["The_Office"]["extension"]
-            TO_Season = config["The_Office"]["seasons"]
+            extension = config["The office us"]["extension"]
+            TO_Season = config["The office us"]["seasons"]
             if seasons is None:
                 seasons = range(1,TO_Season+1)
             for i in seasons:
@@ -80,10 +81,12 @@ class Genius_TV_Scraper(object):
                 res = requests.get(link, timeout = 5)
                 episode_content = BeautifulSoup(res.content, "html.parser")
 
-                ep_script = episode_content.find_all("p")[0].text
+                ep_script_list = [episode_content.find_all("p")[x].text for x in range(len(episode_content.find_all("p"))) if x!=len(episode_content.find_all("p"))-1 or x==0]
+                ep_script = " ".join(ep_script_list)
 
                 # Create regex pattern to parse out names of speakers (first capture group) and the quotes (second capture group)
-                lines = re.findall(r"(?P<narration>(?<=^).*(?=\n\n)|(?<=\n\n).*(?=\n\n)|(?<=\n\n).*(?=$))", ep_script)
+                lines = re.findall(r"(?P<narration>(?<=^).*(?=\n)|(?<=\n).*(?=\n)|(?<=\n).*(?=$))", ep_script)
+                lines=[l for l in lines if l!=""]
                 
                 names_n_quotes=[]
                 names = []
@@ -98,7 +101,8 @@ class Genius_TV_Scraper(object):
                     else:
                         x= names_n_quotes[line_counter][0][0]
                         y= names_n_quotes[line_counter][0][1]
-                    names.append(x)
+                    x = re.sub(r"[ ]*\(.*\)", "", x)
+                    names.append(x.upper().strip())
                     quotes.append(y)
                     line_counter+=1
 
@@ -115,6 +119,7 @@ class Genius_TV_Scraper(object):
                 season_df = pd.concat([season_df, ep_df])
 
             show_df = pd.concat([show_df, season_df])
+            show_df = show_df.reset_index(drop=True)
 
         if json == False:
             return(show_df)
@@ -127,3 +132,26 @@ class Genius_TV_Scraper(object):
         else:
             raise TypeError("JSON variable must be of type boolean.")
 
+def correct_characters(df, show, min_match=config["app"]["min_fuzzy_matching_ratio"], min_partial_match=config["app"]["min_partial_fuzzy_matching_ratio"]):
+    character_dict_path = config[show]["character_config"]
+    with open(character_dict_path) as f:
+        character_dict = json.load(f)
+
+    for key, value in character_dict.items():
+        for name in value:
+            if key == "":
+                for i in list(df["Character_Name"].loc[df["Character_Name"]==name].index):
+                    df["Narration"][i]=df["Line"][i]
+                    df["Line"][i] = ""
+            df["Character_Name"].loc[df["Character_Name"]==name]=key
+    
+    char_list = [x for x in character_dict.keys() if x !=""]
+    min_fuzz = config["app"]["min_fuzzy_matching_ratio"]
+    min_partial_fuzz = config["app"]["min_partial_fuzzy_matching_ratio"]
+    for char_name in char_list:
+        for name in list({x for x in df["Character_Name"] if x!="" and x not in list(character_dict.keys())}):
+            if fuzz.ratio(char_name, name) >= min_fuzz:
+                df["Character_Name"].loc[df["Character_Name"]==name]=char_name
+            elif fuzz.partial_ratio(char_name+" ", name) >= min_partial_fuzz or fuzz.partial_ratio(" "+char_name, name) >= min_partial_fuzz:
+                df["Character_Name"].loc[df["Character_Name"]==name]=char_name
+    return df
