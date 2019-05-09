@@ -1,10 +1,10 @@
 {
     "app":{
         "base_url": "https://genius.com/albums/",
-        "cutoff": 1000,
+        "position_cutoff": 5000,
+        "graph_cutoff": 500,
         "ngrams": [1,2],
         "take_top": 50,
-        "num_characters": 12,
         "measure": "pagerank",
         "pickle": true,
         "json": false,
@@ -16,12 +16,16 @@
         "extension": "Season-{}-scripts",
         "seasons": 7,
         "pickle_path": "GOT_Pickle.pkl",
-        "character_config": "GOT_Characters.json"
+        "character_config": "GOT_Characters.json",
+        "num_characters": 50,
+        "remove_chars": ["", "MAN"]
     },
     "The office us":{
         "extension": "Season-{}",
         "seasons": 2,
         "pickle_path": "Office_Pickle_2.pkl",
-        "charcter_config": "Office_Characters.json"
+        "charcter_config": "Office_Characters.json",
+        "num_characters": 20,
+        "remove_chars": ["", "MAN"]
     }
 }

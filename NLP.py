@@ -15,6 +15,7 @@ from collections import Counter
 import re
 import numpy as np
 from Scraper import Genius_TV_Scraper
+from Scraper import correct_characters
 import math
 import sys
 from helper import second, flatten, sort_dict, smallest_distance
@@ -38,11 +39,13 @@ def pickle_data_frames(show):
 
 def process_episodes(show, seasons=None, Pickle=False):
     if Pickle:
+        print("Pulling Pickle Data")
         pickle_path = config[show]["pickle_path"]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
 
     else:
+        print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
@@ -50,6 +53,8 @@ def process_episodes(show, seasons=None, Pickle=False):
         data = scraper.get_scripts()
 
     #get episodes from data
+    data=correct_characters(data, show)
+    
     z = []
     for i in list(data["Episode"]):
         if i not in z:
@@ -64,13 +69,15 @@ def process_episodes(show, seasons=None, Pickle=False):
 
     return docs
 
-def process_characters(show, seasons=None, num_char=10, Pickle=False):
+def process_characters(show, seasons=None, num_char=50, Pickle=False):
     if Pickle:
+        print("Pulling Pickle Data")
         pickle_path = config[show]["pickle_path"]
         with open(pickle_path, 'rb') as f:
             data = pickle.load(f)
 
     else:
+        print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
@@ -78,22 +85,24 @@ def process_characters(show, seasons=None, num_char=10, Pickle=False):
         data = scraper.get_scripts()
     
     #get characters from data
-    z = []
-    for i in list(data["Character_Name"]):
-        if i not in z:
-            z.append(i)
+    data=correct_characters(data, show)
+
+    remove_char=config[show]["remove_chars"]
+    char_list = [x for x in data["Character_Name"] if x not in remove_char]
+    char_counter=Counter(char_list)
+    z = [x[0] for x in sorted(char_counter.items(), key=lambda x: x[1], reverse=True)][0:num_char]
 
     docs=[]
-    for char in z[0:num_char]:
+    for char in z:
         df = data[data.Character_Name == char]
         char_text = " ".join(list(df["Line"]))
         doc_dict = {char: char_text}
-        docs.append(doc)
+        docs.append(doc_dict)
 
     return docs
 
 class JBRank(object):
-    def __init__(self, docs, ngrams=[1,2,3,4,5,6], cutoff=1000, take_top=50):
+    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50):
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
@@ -111,7 +120,6 @@ class JBRank(object):
             doc = re.sub("g'", "good ", doc)
             doc = re.sub("m'", "my ", doc)
             doc = re.sub("d'", "do ", doc)
-            doc = re.sub("'s", " is", doc)
             
             # Tokenize document
             word_list = word_tokenize(doc)
@@ -141,18 +149,19 @@ class JBRank(object):
         
         self.tf_idf_list = self.get_TFIDF_info(tf_dicts=self.TF_list, idf_dict=IDF_list)
         
-        self.cutoff=cutoff
+        self.position_cutoff=position_cutoff
+        self.graph_cutoff=graph_cutoff
         self.take_top=take_top
         
     def stats(self):
         PFO_factor={}
         tl_factor={}
         for doc in self.tokenized_docs:
-            PFO_factor.update(self.get_PFO(doc, self.cutoff))
+            PFO_factor.update(self.get_PFO(doc, self.position_cutoff))
             tl_factor.update(self.get_TL(doc))
             for size in self.grams:
                 tokenized_ngrams = ["_".join(doc[x:x+size]) for x in range(len(doc)) if len(doc[x:x+size])== size]
-                PFO_factor.update(self.get_PFO(tokenized_ngrams, self.cutoff))
+                PFO_factor.update(self.get_PFO(tokenized_ngrams, self.position_cutoff))
                 tl_factor.update(self.get_TL(tokenized_ngrams))
                 
         self.stat_ranking= self.tf_idf_list.copy()
@@ -177,7 +186,7 @@ class JBRank(object):
             for word in words:
                 indices_dict.update({word:self.get_inds_for_gram(word, doc)})
 
-            weights_df=self.get_edge_weights(indices_dict, self.cutoff)
+            weights_df=self.get_edge_weights(indices_dict, self.graph_cutoff)
             for word1 in words:
                 for word2 in words:
                     if weights_df[word1][word2]==0 or math.isnan(weights_df[word1][word2]):
@@ -249,7 +258,7 @@ class JBRank(object):
         idf_list=dict(Counter(term_list))
         
         for key, val in idf_list.items():
-            if len(re.findall("_", key))==0:
+            if len(re.findall("_", key))<2:
                 idf_list[key] = np.log(len(list_of_bows)/val)
                 
             else:
