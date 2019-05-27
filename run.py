@@ -21,7 +21,7 @@ if __name__ == '__main__':
         print(i)
         print(ep_rank.final_rankings[i])
 
-    print ("*"*50)
+    print("*"*50)
 
     num_char = config[show]["num_characters"]
     characters=NLP.process_characters(show, num_char=num_char, Pickle=pick)
