@@ -10,7 +10,8 @@
         "json": false,
         "shows": ["Game of thrones", "The office us"],
         "min_fuzzy_matching_ratio": 90,
-        "min_partial_fuzzy_matching_ratio": 100
+        "min_partial_fuzzy_matching_ratio": 100,
+        "DAN_sentence_encoder_url": "https://tfhub.dev/google/universal-sentence-encoder/2"
     },
     "Game of thrones":{
         "extension": "Season-{}-scripts",

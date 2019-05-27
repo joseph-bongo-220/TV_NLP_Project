@@ -6,7 +6,7 @@ Created on Tue Dec 11 01:29:33 2018
 """
 
 """Use My Own Algorithm to Extract Keyphrases"""
-from nltk.tokenize import word_tokenize
+from nltk.tokenize import sent_tokenize, word_tokenize
 import networkx as nx
 import pickle
 import pandas as pd 
@@ -22,6 +22,9 @@ from helper import second, flatten, sort_dict, smallest_distance
 from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions
 from app_config import get_config
 import os
+
+import tensorflow as tf 
+import tensorflow_hub as hub
 
 config = get_config()
 
@@ -120,6 +123,7 @@ class JBRank(object):
             doc = re.sub("g'", "good ", doc)
             doc = re.sub("m'", "my ", doc)
             doc = re.sub("d'", "do ", doc)
+            doc = re.sub(" s ", "s ", doc)
             
             # Tokenize document
             word_list = word_tokenize(doc)
@@ -286,7 +290,7 @@ class JBRank(object):
                 PFO_dict.update({word:nums[-i]})
         
         for key, val in PFO_dict.items():
-            PFO_dict[key] = np.log(cutoff_position/val)  
+            PFO_dict[key] = np.log(500+(cutoff_position/val)) 
         return PFO_dict
 
     def get_TL(self, tokenized_doc):
@@ -310,8 +314,57 @@ class JBRank(object):
         measure = config["app"]["measure"]
         self.graph(measure=measure)
 
-if __name__ == "__main__":
-    with open('examples.pkl', 'rb') as f:
-        docs = pickle.load(f)
-    x=JBRank(docs=docs, ngrams=[1,2])
-    x.run()
+class SemanticAlgos(object):
+    def __init__(self, docs):
+        cList = get_contractions()
+        self.tokenized_sents=[]
+        self.cleaned_docs={}
+        self.doc_titles=[]
+        self.doc_embeddings={}
+        self.sentence_embeddings={}
+
+        self.embed = load_TF_Universal_Sentence_Encoder()
+        self.session = tf.Session()
+
+        for doc_dict in docs:
+            key_ = list(doc_dict.keys())[0]
+            self.doc_titles.append(key_)
+            doc = list(doc_dict.values())[0]
+            doc = doc.lower()
+            
+            for x in list(cList.keys()):
+                doc = re.sub(x, cList[x], doc)
+            
+            # Replace other uncommon contractions (mainly from GOT)
+            doc = re.sub("g'", "good ", doc)
+            doc = re.sub("m'", "my ", doc)
+            doc = re.sub("d'", "do ", doc)
+            doc = re.sub(" s ", "s ", doc)
+            doc = re.sub("[ ]{2,}", " ", doc)
+
+            self.cleaned_docs.update({key_:doc})
+
+    @staticmethod
+    def load_TF_Universal_Sentence_Encoder():
+        embed = hub.Module(config["app"]["DAN_sentence_encoder_url"])
+        return embed
+
+    @staticmethod
+    def tokenize_sentences(doc):
+        separators="[\.|?|!|\n]"
+        return [x.strip() for x in re.split(separators, doc) if x != ""]
+
+    def get_sentence_embeddings(self):
+        for title, doc in cleaned_docs:
+            self.tokenized_sents.append(tokenize_sentences(doc))
+            if title not in list(self.sentence_embeddings.keys()):
+                with tf.Session() as session:
+                    embeddings = embed(tokenize_sentences(doc))
+                    self.sentence_embeddings.update({title: session.run(embeddings)})
+
+    def graph_text_summarization(self):
+        self.get_sentence_embeddings()
+        # do graph stuff
+    
+    def text_similarity(self):
+        pass
