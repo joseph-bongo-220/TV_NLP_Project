@@ -19,7 +19,9 @@
         "pickle_path": "GOT_Pickle.pkl",
         "character_config": "GOT_Characters.json",
         "num_characters": 50,
-        "remove_chars": ["", "MAN"]
+        "remove_chars": ["", "MAN"],
+        "sentence_pkl_path": "GOT_sentence_embeddings2.pkl",
+        "doc_pkl_path": "GOT_doc_embeddings.pkl"
     },
     "The office us":{
         "extension": "Season-{}",
@@ -27,6 +29,8 @@
         "pickle_path": "Office_Pickle_2.pkl",
         "charcter_config": "Office_Characters.json",
         "num_characters": 20,
-        "remove_chars": ["", "MAN"]
+        "remove_chars": ["", "MAN"],
+        "sentence_pkl_path": "office_sentence_embeddings.pkl",
+        "doc_pkl_path": "office_doc_embeddings.pkl"
     }
 }
