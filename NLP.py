@@ -22,6 +22,8 @@ from helper import second, flatten, sort_dict, smallest_distance
 from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions
 from app_config import get_config
 import os
+from sklearn.metrics import pairwise_distances
+from scipy.spatial.distance import cosine
 
 import tensorflow as tf 
 import tensorflow_hub as hub
@@ -105,7 +107,7 @@ def process_characters(show, seasons=None, num_char=50, Pickle=False):
     return docs
 
 class JBRank(object):
-    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50):
+    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones"):
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
@@ -120,9 +122,9 @@ class JBRank(object):
                 doc = re.sub(x, cList[x], doc)
             
             # Replace other uncommon contractions (mainly from GOT)
-            doc = re.sub("g'", "good ", doc)
-            doc = re.sub("m'", "my ", doc)
-            doc = re.sub("d'", "do ", doc)
+            doc = re.sub(" g'", " good ", doc)
+            doc = re.sub(" m'", " my ", doc)
+            doc = re.sub(" d'", " do ", doc)
             doc = re.sub(" s ", "s ", doc)
             
             # Tokenize document
@@ -315,16 +317,18 @@ class JBRank(object):
         self.graph(measure=measure)
 
 class SemanticAlgos(object):
-    def __init__(self, docs):
+    def __init__(self, docs, sent_threshold = .3, show="Game of thrones"):
         cList = get_contractions()
+        self.sent_threshold = sent_threshold
         self.tokenized_sents=[]
         self.cleaned_docs={}
         self.doc_titles=[]
         self.doc_embeddings={}
         self.sentence_embeddings={}
+        self.sentence_dists={}
+        self.show=show
 
-        self.embed = load_TF_Universal_Sentence_Encoder()
-        self.session = tf.Session()
+        self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
 
         for doc_dict in docs:
             key_ = list(doc_dict.keys())[0]
@@ -336,9 +340,9 @@ class SemanticAlgos(object):
                 doc = re.sub(x, cList[x], doc)
             
             # Replace other uncommon contractions (mainly from GOT)
-            doc = re.sub("g'", "good ", doc)
-            doc = re.sub("m'", "my ", doc)
-            doc = re.sub("d'", "do ", doc)
+            doc = re.sub(" g'", " good ", doc)
+            doc = re.sub(" m'", " my ", doc)
+            doc = re.sub(" d'", " do ", doc)
             doc = re.sub(" s ", "s ", doc)
             doc = re.sub("[ ]{2,}", " ", doc)
 
@@ -355,16 +359,102 @@ class SemanticAlgos(object):
         return [x.strip() for x in re.split(separators, doc) if x != ""]
 
     def get_sentence_embeddings(self):
-        for title, doc in cleaned_docs:
-            self.tokenized_sents.append(tokenize_sentences(doc))
-            if title not in list(self.sentence_embeddings.keys()):
-                with tf.Session() as session:
-                    embeddings = embed(tokenize_sentences(doc))
-                    self.sentence_embeddings.update({title: session.run(embeddings)})
+        pickle_path=config[self.show]["sentence_pkl_path"]
+        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
+        if pickle_path in pickle_files:
+            print("Gathering serialized sentences")
+            with open(pickle_path, 'rb') as f:
+                self.sentence_embeddings = pickle.load(f)
+        else:
+            i=1
+            with tf.Session() as session:
+                session.run([tf.global_variables_initializer(), tf.tables_initializer()])
+                for title, doc in self.cleaned_docs.items():
+                    self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
+                    if title not in list(self.sentence_embeddings.keys()):
+                        print("Gathering Tensorflow Embedding")
+                        sents = SemanticAlgos.tokenize_sentences(doc)
+                        sent_embeddings = session.run(self.embed(sents))
+                        sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
+                        self.sentence_embeddings.update({title: sents_dict})
+                        print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
+                        i = i+1
+            with open(pickle_path, 'wb') as handle:
+                pickle.dump(self.sentence_embeddings, handle)
 
-    def graph_text_summarization(self):
+    def get_doc_embeddings(self):
+        pickle_path=config[self.show]["doc_pkl_path"]
+        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
+        if pickle_path in pickle_files:
+            print("Gathering serialized documents")
+            with open(pickle_path, 'rb') as handle:
+                self.doc_embeddings = pickle.load(handle)
+        else:
+            i=1
+            with tf.Session() as session:
+                session.run([tf.global_variables_initializer(), tf.tables_initializer()])
+                for title, doc in self.cleaned_docs.items():
+                    if title not in list(self.doc_embeddings.keys()):
+                        print("Gathering Tensorflow Embedding")
+                        embeddings = session.run(self.embed([doc]))
+                        self.doc_embeddings.update({title: embeddings[0]})
+                        print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
+                        i = i+1
+            with open(pickle_path, 'wb') as handle:
+                pickle.dump(self.doc_embeddings, handle)
+
+    def graph_text_summarization(self, top_sents=6, measure="pagerank", order_by_occurence=True):
+        results={}
         self.get_sentence_embeddings()
-        # do graph stuff
-    
-    def text_similarity(self):
-        pass
+        for title, sent_embed in self.sentence_embeddings.items():
+            # do graph stuff
+            dists = 1-pairwise_distances(list(sent_embed.values()), metric="cosine")
+            dists = pd.DataFrame(dists, index = list(sent_embed.keys()), columns=list(sent_embed.keys()))
+            G = nx.Graph()
+            G.add_nodes_from(list(dists.columns))
+            for i in list(dists.columns):
+                for j in list(dists.index):
+                    if i==j or math.isnan(dists[i][j]) or dists[i][j] < self.sent_threshold:
+                        pass
+                    else:
+                        G.add_edge(i, j, weight=dists[i][j])
+                        dists[j][i]=None
+            if measure == "pagerank":
+                gr_dict=nx.pagerank(G)
+            elif measure == "betweenness centrality":
+                gr_dict=nx.betweenness_centrality(G, weight="weight")
+            elif measure == "load centrality":
+                gr_dict=nx.load_centrality(G, weight="weight")
+            temp_dict = sort_dict(gr_dict)
+            sorted_gr_dict = temp_dict[0:top_sents]
+            sorted_gr_dict = {key:value for key,value in sorted_gr_dict}
+            if order_by_occurence:
+                summary_dict = {x:gr_dict[x] for x in list(gr_dict.keys()) if x in list(sorted_gr_dict.keys())}
+            else:
+                summary_dict = sorted_gr_dict
+            # sentences = [sent_embed[key] for key,value in sorted_gr_dict]
+            results.update({title:list(summary_dict.keys())})
+        return(results)
+
+    def text_similarity(self, take_top=10):
+        results={}
+        self.get_doc_embeddings()
+        doc_titles = list(self.doc_embeddings.keys())
+        doc_embeddings = list(self.doc_embeddings.values())
+        print(doc_embeddings[0:5])
+        dists=1-pairwise_distances(doc_embeddings, metric="cosine")
+        for i in range(len(dists)):
+            print(str(i))
+            similarity_dict={}
+            for j in range(len(dists)):
+                if i == j:
+                    pass
+                else:
+                    similarity_dict.update({doc_titles[j]: dists[i][j]})
+            sorted_doc_dict = sort_dict(similarity_dict)[0:take_top]
+            results.update({doc_titles[i]: {key:value for key,value in sorted_doc_dict}})
+        # print(results)
+        # temp_results=sort_dict(results)
+        # final_results=temp_results[0:take_top]
+        # final_results= {key:value for key,value in final_results}
+        return(results)
