@@ -107,7 +107,7 @@ def process_characters(show, seasons=None, num_char=50, Pickle=False):
     return docs
 
 class JBRank(object):
-    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50):
+    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones"):
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
@@ -122,9 +122,10 @@ class JBRank(object):
                 doc = re.sub(x, cList[x], doc)
             
             # Replace other uncommon contractions (mainly from GOT)
-            doc = re.sub("g'", "good ", doc)
-            doc = re.sub("m'", "my ", doc)
-            doc = re.sub("d'", "do ", doc)
+            doc = re.sub(" g'", " good ", doc)
+            doc = re.sub(" m'", " my ", doc)
+            doc = re.sub(" d'", " do ", doc)
+            doc = re.sub(" s ", "s ", doc)
             
             # Tokenize document
             word_list = word_tokenize(doc)
@@ -291,7 +292,7 @@ class JBRank(object):
                 PFO_dict.update({word:nums[-i]})
         
         for key, val in PFO_dict.items():
-            PFO_dict[key] = np.log(cutoff_position/val)  
+            PFO_dict[key] = np.log(500+(cutoff_position/val)) 
         return PFO_dict
 
     def get_TL(self, tokenized_doc):

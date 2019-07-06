@@ -1,11 +1,12 @@
 import NLP
-from NLP import JBRank
+from NLP import JBRank, SemanticAlgos
 import json
 from app_config import get_config
-from Scraper import Genius_TV_Scraper
+from Scraper import Genius_TV_Scraper, correct_characters
 import pickle
 from Scraper import correct_characters
 import time
+
 
 config = get_config()
 
