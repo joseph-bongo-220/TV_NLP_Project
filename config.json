@@ -1,5 +1,6 @@
 {
     "app":{
+        "debug": true,
         "base_url": "https://genius.com/albums/",
         "position_cutoff": 5000,
         "graph_cutoff": 500,
@@ -27,7 +28,7 @@
         "extension": "Season-{}",
         "seasons": 2,
         "pickle_path": "Office_Pickle_2.pkl",
-        "charcter_config": "Office_Characters.json",
+        "charcter_config": "The_Office_Characters.json",
         "num_characters": 20,
         "remove_chars": ["", "MAN"],
         "sentence_pkl_path": "office_sentence_embeddings.pkl",
