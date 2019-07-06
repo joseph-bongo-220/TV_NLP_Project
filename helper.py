@@ -10,8 +10,11 @@ def flatten(x):
     flattened = [val for sublist in x for val in sublist]
     return flattened
 
-def sort_dict(dict_unsorted):
-    dict_sorted = sorted(dict_unsorted.items(), key=lambda x: x[1], reverse=True)
+def sort_dict(dict_unsorted, value=True, descending=True):
+    if value:
+        dict_sorted = sorted(dict_unsorted.items(), key=lambda x: x[1], reverse=descending)
+    else:
+        dict_sorted = sorted(dict_unsorted.items(), key=lambda x: x[0], reverse=descending)
     return dict_sorted
 
 def smallest_distance(list1, list2):
