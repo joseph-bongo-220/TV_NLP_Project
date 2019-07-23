@@ -30,26 +30,28 @@ import tensorflow_hub as hub
 
 config = get_config()
 
-def pickle_data_frames(show):
+def get_pickle_data_frames(show, seasons=None):
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
     pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
     path = config[show]["pickle_path"]
 
     if path in pickle_files:
-        pass
+        print("Pulling Pickle Data")
+        with open(path, 'rb') as f:
+            data = pickle.load(f)
     else:
-        Scraper = Genius_TV_Scraper(show=show)
+        print("Gathering Data from Genius.com")
+        Scraper = Genius_TV_Scraper(show=show, seasons=seasons)
         data = Scraper.get_scripts()
         data.to_pickle(path)
+    return data
 
-def process_episodes(show, seasons=None, Pickle=False):
+def process_episodes(show, seasons=None, Pickle=True):
     if Pickle:
-        print("Pulling Pickle Data")
-        pickle_path = config[show]["pickle_path"]
-        with open(pickle_path, 'rb') as f:
-            data = pickle.load(f)
+        data = get_pickle_data_frames(show=show, seasons=seasons)
 
     else:
+        print("Running A Clean Scrape")
         print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
@@ -60,11 +62,8 @@ def process_episodes(show, seasons=None, Pickle=False):
     #get episodes from data
     data=correct_characters(data, show)
     
-    z = []
-    for i in list(data["Episode"]):
-        if i not in z:
-            z.append(i)
-    
+    z = list(set(data["Episode"]))
+
     docs=[]
     for episode in z:
         df = data[data.Episode == episode]
@@ -72,7 +71,14 @@ def process_episodes(show, seasons=None, Pickle=False):
         doc_dict = {episode: doc}
         docs.append(doc_dict)
 
-    return docs
+    season_dict = {"All": z}
+    if seasons is None:
+        seasons = [i+1 for i in range(config[show][seasons])]
+    for i in seasons:
+        x = list(set(data["Episode"][data["Season"]==i]))
+        season_dict.update({str(i): x})
+
+    return docs, season_dict
 
 def process_characters(show, seasons=None, num_char=50, Pickle=False):
     if Pickle:
@@ -107,6 +113,7 @@ def process_characters(show, seasons=None, num_char=50, Pickle=False):
     return docs
 
 class JBRank(object):
+    """Keyphrase Extraction Algorithm that I wrote based on unsupervised SGRank. More info will follow in README"""
     def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones"):
         cList = get_contractions()
         self.TF_list=[]
@@ -403,37 +410,46 @@ class SemanticAlgos(object):
             with open(pickle_path, 'wb') as handle:
                 pickle.dump(self.doc_embeddings, handle)
 
-    def graph_text_summarization(self, top_sents=6, measure="pagerank", order_by_occurence=True):
-        results={}
-        self.get_sentence_embeddings()
-        for title, sent_embed in self.sentence_embeddings.items():
-            # do graph stuff
-            dists = 1-pairwise_distances(list(sent_embed.values()), metric="cosine")
-            dists = pd.DataFrame(dists, index = list(sent_embed.keys()), columns=list(sent_embed.keys()))
-            G = nx.Graph()
-            G.add_nodes_from(list(dists.columns))
-            for i in list(dists.columns):
-                for j in list(dists.index):
-                    if i==j or math.isnan(dists[i][j]) or dists[i][j] < self.sent_threshold:
-                        pass
-                    else:
-                        G.add_edge(i, j, weight=dists[i][j])
-                        dists[j][i]=None
-            if measure == "pagerank":
-                gr_dict=nx.pagerank(G)
-            elif measure == "betweenness centrality":
-                gr_dict=nx.betweenness_centrality(G, weight="weight")
-            elif measure == "load centrality":
-                gr_dict=nx.load_centrality(G, weight="weight")
-            temp_dict = sort_dict(gr_dict)
-            sorted_gr_dict = temp_dict[0:top_sents]
-            sorted_gr_dict = {key:value for key,value in sorted_gr_dict}
-            if order_by_occurence:
-                summary_dict = {x:gr_dict[x] for x in list(gr_dict.keys()) if x in list(sorted_gr_dict.keys())}
-            else:
-                summary_dict = sorted_gr_dict
-            # sentences = [sent_embed[key] for key,value in sorted_gr_dict]
-            results.update({title:list(summary_dict.keys())})
+    def graph_text_summarization(self, doc_type, top_sents=6, measure="pagerank", order_by_occurence=True, use_pkl=True):
+        """Text Summarization Algorithm that I wrote based on LexRank More info will follow in README"""
+        pickle_path=config[self.show]["text_summ_pkl_path"][doc_type]
+        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
+        if use_pkl and pickle_path in pickle_files:
+            with open(pickle_path, 'rb') as handle:
+                results = pickle.load(handle)
+        else:
+            results={}
+            self.get_sentence_embeddings()
+            for title, sent_embed in self.sentence_embeddings.items():
+                # do graph stuff
+                dists = 1-pairwise_distances(list(sent_embed.values()), metric="cosine")
+                dists = pd.DataFrame(dists, index = list(sent_embed.keys()), columns=list(sent_embed.keys()))
+                G = nx.Graph()
+                G.add_nodes_from(list(dists.columns))
+                for i in list(dists.columns):
+                    for j in list(dists.index):
+                        if i==j or math.isnan(dists[i][j]) or dists[i][j] < self.sent_threshold:
+                            pass
+                        else:
+                            G.add_edge(i, j, weight=dists[i][j])
+                            dists[j][i]=None
+                if measure == "pagerank":
+                    gr_dict=nx.pagerank(G)
+                elif measure == "betweenness centrality":
+                    gr_dict=nx.betweenness_centrality(G, weight="weight")
+                elif measure == "load centrality":
+                    gr_dict=nx.load_centrality(G, weight="weight")
+                temp_dict = sort_dict(gr_dict)
+                sorted_gr_dict = temp_dict[0:top_sents]
+                sorted_gr_dict = {key:value for key,value in sorted_gr_dict}
+                if order_by_occurence:
+                    summary_dict = {x:gr_dict[x] for x in list(gr_dict.keys()) if x in list(sorted_gr_dict.keys())}
+                else:
+                    summary_dict = sorted_gr_dict
+                # sentences = [sent_embed[key] for key,value in sorted_gr_dict]
+                results.update({title:list(summary_dict.keys())})
+            with open(pickle_path, 'wb') as handle:
+                pickle.dump(results, handle)
         return(results)
 
     def text_similarity(self, take_top=10):
@@ -441,10 +457,8 @@ class SemanticAlgos(object):
         self.get_doc_embeddings()
         doc_titles = list(self.doc_embeddings.keys())
         doc_embeddings = list(self.doc_embeddings.values())
-        print(doc_embeddings[0:5])
         dists=1-pairwise_distances(doc_embeddings, metric="cosine")
         for i in range(len(dists)):
-            print(str(i))
             similarity_dict={}
             for j in range(len(dists)):
                 if i == j:
@@ -458,3 +472,8 @@ class SemanticAlgos(object):
         # final_results=temp_results[0:take_top]
         # final_results= {key:value for key,value in final_results}
         return(results)
+
+if __name__ == "__main__":
+    show = "Game of thrones"
+    data = get_pickle_data_frames(show=show)
+    print(set([x for x in data["Episode"]]))
