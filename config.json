@@ -17,13 +17,18 @@
     "Game of thrones":{
         "extension": "Season-{}-scripts",
         "seasons": 7,
-        "pickle_path": "GOT_Pickle_2.pkl",
+        "pickle_path": "GOT_Pickle.pkl",
         "character_config": "GOT_Characters.json",
         "num_characters": 50,
         "remove_chars": ["", "MAN"],
         "remove_links": ["https://genius.com/Game-of-thrones-season-4-preview-annotated", "https://genius.com/Game-of-thrones-season-5-trailer-breakdown-annotated"],
-        "sentence_pkl_path": "GOT_sentence_embeddings2.pkl",
-        "doc_pkl_path": "GOT_doc_embeddings.pkl",
+        "embeddings":{
+            "episodes":{
+                "sentence_pkl_path": "GOT_sentence_embeddings.pkl",
+                "doc_pkl_path": "GOT_doc_embeddings.pkl"
+            },
+            "chars":{
+                "doc_pkl_path": "GOT_char_sent_embeddings.pkl"}},
         "text_summ_pkl_path":{
             "episodes": "GOT_txt_summ_eps.pkl",
             "chars": "GOT_txt_summ_chars.pkl"}
@@ -36,10 +41,15 @@
         "num_characters": 20,
         "remove_chars": ["", "MAN"],
         "remove_links": ["https://genius.com/The-office-us-basketball-annotated", "https://genius.com/The-office-us-hot-girl-annotated"],
-        "sentence_pkl_path": "office_sentence_embeddings.pkl",
-        "doc_pkl_path": "office_doc_embeddings.pkl",
+        "embeddings":{
+            "episodes":{
+                "sentence_pkl_path": "Office_sentence_embeddings.pkl",
+                "doc_pkl_path": "Office_doc_embeddings.pkl"
+            },
+            "chars":{
+                "doc_pkl_path": "Office_char_sent_embeddings.pkl"}},
         "text_summ_pkl_path":{
-            "episodes": "office_txt_summ_eps.pkl",
-            "chars": "office_txt_summ_chars.pkl"}
+            "episodes": "Office_txt_summ_eps.pkl",
+            "chars": "Office_txt_summ_chars.pkl"}
     }
 }
