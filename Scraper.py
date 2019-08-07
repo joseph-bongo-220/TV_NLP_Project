@@ -123,6 +123,7 @@ class Genius_TV_Scraper(object):
 
             show_df = pd.concat([show_df, season_df])
             show_df = show_df.reset_index(drop=True)
+            s=s+1
 
         if json == False:
             return(show_df)
