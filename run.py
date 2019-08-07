@@ -6,6 +6,7 @@ from Scraper import Genius_TV_Scraper, correct_characters
 import pickle
 from Scraper import correct_characters
 import time
+import json
 
 config = get_config()
 
@@ -13,9 +14,11 @@ def get_NLP_results():
     shows = [x for x in config.keys() if x!= 'app']
     result_dict = {}
     for show in shows:
+        print(show)
         show_dict={}
         pick = config["app"]["pickle"]
         episodes, season_dict = NLP.process_episodes(show, Pickle=pick)
+        print("episodes processed")
         show_dict.update({"seasons": season_dict})
         ngrams = config["app"]["ngrams"]
         ep_rank=JBRank(docs=episodes, ngrams=ngrams)
@@ -29,19 +32,18 @@ def get_NLP_results():
         char_rank.run()
         show_dict.update({"character_keyphrases": char_rank.final_rankings})
 
-        ep_algs = SemanticAlgos(episodes, show=show)
+        ep_algs = SemanticAlgos(episodes, doc_type="episodes", show=show)
         start = time.time()
         show_dict.update({"episode_text_similarity": ep_algs.text_similarity()})
         end = time.time()
         print("Text similarity time " + str(end-start))
         start = time.time()
-        show_dict.update({"episode_text_summarization": ep_algs.graph_text_summarization(doc_type="episodes")})
+        show_dict.update({"episode_text_summarization": ep_algs.graph_text_summarization()})
         end = time.time()
         print("Text summarization time " + str(end-start))
 
-        char_algs = SemanticAlgos(characters, show=show)
+        char_algs = SemanticAlgos(characters, doc_type="chars", show=show)
         show_dict.update({"character_dialogue_similarity": char_algs.text_similarity()})
-        show_dict.update({"character_dialogue_summarization": char_algs.graph_text_summarization(doc_type="chars")})
 
         result_dict.update({show: show_dict})
 
@@ -51,5 +53,4 @@ if __name__ == '__main__':
     start = time.time()
     res = get_NLP_results()
     end = time.time()
-    print(res)
     print("Total time " + str(end-start))

@@ -62,7 +62,10 @@ def process_episodes(show, seasons=None, Pickle=True):
     #get episodes from data
     data=correct_characters(data, show)
     
-    z = list(set(data["Episode"]))
+    z = []
+    for i in list(data["Episode"]):
+        if i not in z:
+            z.append(i)
 
     docs=[]
     for episode in z:
@@ -73,9 +76,13 @@ def process_episodes(show, seasons=None, Pickle=True):
 
     season_dict = {"All": z}
     if seasons is None:
-        seasons = [i+1 for i in range(config[show][seasons])]
+        seasons = [i+1 for i in range(config[show]["seasons"])]
     for i in seasons:
-        x = list(set(data["Episode"][data["Season"]==i]))
+        x = []
+        for j in list(data["Episode"][data["Season"]==i]):
+            if j not in x:
+                x.append(j)
+
         season_dict.update({str(i): x})
 
     return docs, season_dict
@@ -113,8 +120,8 @@ def process_characters(show, seasons=None, num_char=50, Pickle=False):
     return docs
 
 class JBRank(object):
-    """Keyphrase Extraction Algorithm that I wrote based on unsupervised SGRank. More info will follow in README"""
-    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones"):
+    """Keyphrase Extraction Algorithm that I wrote based on unsupervised SGRank paper. More info will follow in README"""
+    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones", correct_subsum=False):
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
@@ -156,7 +163,8 @@ class JBRank(object):
             
             self.TF_list.append(BOW)
             
-            #self.TF_list=self.subsum_correction(TF_list)
+            if correct_subsum:
+                self.TF_list=self.subsum_correction(TF_list)
             
         IDF_list = self.get_BOW_IDF(self.TF_list)
         
@@ -324,7 +332,7 @@ class JBRank(object):
         self.graph(measure=measure)
 
 class SemanticAlgos(object):
-    def __init__(self, docs, sent_threshold = .3, show="Game of thrones"):
+    def __init__(self, docs, doc_type, sent_threshold = .3, show="Game of thrones"):
         cList = get_contractions()
         self.sent_threshold = sent_threshold
         self.tokenized_sents=[]
@@ -334,8 +342,15 @@ class SemanticAlgos(object):
         self.sentence_embeddings={}
         self.sentence_dists={}
         self.show=show
+        self.doc_type=doc_type
 
-        self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
+        all_pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
+        embedding_pickles = []
+        for show_ in config["app"]["shows"]:
+            embedding_pickles.extend([config[show_]["embeddings"]["chars"]["doc_pkl_path"], config[show_]["embeddings"]["episodes"]["doc_pkl_path"], config[show_]["embeddings"]["episodes"]["sentence_pkl_path"]])
+
+        if set(embedding_pickles).issubset(set(all_pickle_files))==False:
+            self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
 
         for doc_dict in docs:
             key_ = list(doc_dict.keys())[0]
@@ -357,6 +372,7 @@ class SemanticAlgos(object):
 
     @staticmethod
     def load_TF_Universal_Sentence_Encoder():
+        print("Loading TensorFlow Universal Sentence Encoder")
         embed = hub.Module(config["app"]["DAN_sentence_encoder_url"])
         return embed
 
@@ -366,7 +382,7 @@ class SemanticAlgos(object):
         return [x.strip() for x in re.split(separators, doc) if x != ""]
 
     def get_sentence_embeddings(self):
-        pickle_path=config[self.show]["sentence_pkl_path"]
+        pickle_path=config[self.show]["embeddings"][self.doc_type]["sentence_pkl_path"]
         pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
         if pickle_path in pickle_files:
             print("Gathering serialized sentences")
@@ -390,7 +406,7 @@ class SemanticAlgos(object):
                 pickle.dump(self.sentence_embeddings, handle)
 
     def get_doc_embeddings(self):
-        pickle_path=config[self.show]["doc_pkl_path"]
+        pickle_path=config[self.show]["embeddings"][self.doc_type]["doc_pkl_path"]
         pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
         if pickle_path in pickle_files:
             print("Gathering serialized documents")
@@ -410,9 +426,9 @@ class SemanticAlgos(object):
             with open(pickle_path, 'wb') as handle:
                 pickle.dump(self.doc_embeddings, handle)
 
-    def graph_text_summarization(self, doc_type, top_sents=6, measure="pagerank", order_by_occurence=True, use_pkl=True):
-        """Text Summarization Algorithm that I wrote based on LexRank More info will follow in README"""
-        pickle_path=config[self.show]["text_summ_pkl_path"][doc_type]
+    def graph_text_summarization(self, top_sents=6, measure="pagerank", order_by_occurence=True, use_pkl=True):
+        """Text Summarization Algorithm that I wrote based on LexRank paper. More info will follow in README"""
+        pickle_path=config[self.show]["text_summ_pkl_path"][self.doc_type]
         pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
         if use_pkl and pickle_path in pickle_files:
             with open(pickle_path, 'rb') as handle:
