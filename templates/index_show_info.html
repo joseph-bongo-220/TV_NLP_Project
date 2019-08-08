@@ -16,11 +16,6 @@
         {% for text in text_similarity %}
             <p>{{ text }}</p>
         {% endfor %}
-        <h3>
-            Summarization of Text:
-        </h3>
-        {% for sentence in text_summarization %}
-            <p>{{ sentence }}</p>
-        {% endfor %}
+        {% block textsum %}{% endblock textsum %}
     </div>
 {% endblock info %}

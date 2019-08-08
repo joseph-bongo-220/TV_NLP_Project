@@ -43,13 +43,13 @@
         "remove_links": ["https://genius.com/The-office-us-basketball-annotated", "https://genius.com/The-office-us-hot-girl-annotated"],
         "embeddings":{
             "episodes":{
-                "sentence_pkl_path": "Office_sentence_embeddings.pkl",
-                "doc_pkl_path": "Office_doc_embeddings.pkl"
+                "sentence_pkl_path": "office_sentence_embeddings.pkl",
+                "doc_pkl_path": "office_doc_embeddings.pkl"
             },
             "chars":{
                 "doc_pkl_path": "Office_char_sent_embeddings.pkl"}},
         "text_summ_pkl_path":{
-            "episodes": "Office_txt_summ_eps.pkl",
-            "chars": "Office_txt_summ_chars.pkl"}
+            "episodes": "office_txt_summ_eps.pkl",
+            "chars": "office_txt_summ_chars.pkl"}
     }
 }
