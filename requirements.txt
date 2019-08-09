@@ -9,3 +9,5 @@ tensorflow
 tensorflow_hub
 fuzzywuzzy==0.17.0
 flask
+sklearn
+scipy

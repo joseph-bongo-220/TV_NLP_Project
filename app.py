@@ -1,11 +1,15 @@
 from flask import Flask, jsonify, render_template
 from app_config import get_config
 from run import get_NLP_results
+import time
 
 app = Flask(__name__)
 
 config = get_config()
+start = time.time()
 results = get_NLP_results()
+end = time.time()
+print("Total time " + str(end-start))
 
 shows = ["--SELECT A SHOW--"]+[x for x in config.keys() if x!= 'app']
 
@@ -32,19 +36,19 @@ def get_episode_info(show, season, episode):
     episode_text_similarity = results[show]["episode_text_similarity"][episode]
     episode_text_summarization = results[show]["episode_text_summarization"][episode]
 
-    return(render_template('index_show_info.html', shows=shows, show_selected=show, entity=episodes, entity_selected=episode, 
+    return(render_template('index_show_info_eps.html', shows=shows, show_selected=show, entity=episodes, entity_selected=episode, 
     keyphrases = episode_keyphrases, text_similarity = episode_text_similarity, text_summarization = episode_text_summarization,
     seasons={"seasons":[str(x+1) for x in range(config[show]["seasons"])]+["All"]}))
 
 @app.route('/show=<show>/char=<character>', methods=['GET', 'POST'])
 def get_character_info(show, character):
+    characters = [x for x in results[show]["character_keyphrases"].keys()]
     character_keyphrases = results[show]["character_keyphrases"][character]
     character_dialogue_similarity = results[show]["character_dialogue_similarity"][character]
-    character_dialogue_summarization = results[show]["character_dialogue_summarization"][character]
 
     return(render_template('index_show_info.html', shows=shows, show_selected=show, entity=characters, entity_selected=character, 
-    keyphrases = character_keyphrases, text_similarity = character_dialogue_similarity, text_summarization = character_dialogue_summarization,
+    keyphrases = character_keyphrases, text_similarity = character_dialogue_similarity,
     seasons={"seasons":[str(x+1) for x in range(config[show]["seasons"])]+["All"]}))
 
 if __name__ == '__main__':
-    app.run(debug=config["app"]["debug"])
+    app.run(debug=config["app"]["debug"], use_reloader=config["app"]["use_reloader"])

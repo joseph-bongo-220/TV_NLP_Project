@@ -1,6 +1,7 @@
 {
     "app":{
         "debug": true,
+        "use_reloader": false,
         "base_url": "https://genius.com/albums/",
         "position_cutoff": 5000,
         "graph_cutoff": 500,
@@ -17,39 +18,39 @@
     "Game of thrones":{
         "extension": "Season-{}-scripts",
         "seasons": 7,
-        "pickle_path": "GOT_Pickle.pkl",
+        "pickle_path": "GOT_pkls/GOT_Pickle.pkl",
         "character_config": "GOT_Characters.json",
         "num_characters": 50,
         "remove_chars": ["", "MAN"],
         "remove_links": ["https://genius.com/Game-of-thrones-season-4-preview-annotated", "https://genius.com/Game-of-thrones-season-5-trailer-breakdown-annotated"],
         "embeddings":{
             "episodes":{
-                "sentence_pkl_path": "GOT_sentence_embeddings.pkl",
-                "doc_pkl_path": "GOT_doc_embeddings.pkl"
+                "sentence_pkl_path": "GOT_pkls/GOT_sentence_embeddings.pkl",
+                "doc_pkl_path": "GOT_pkls/GOT_doc_embeddings.pkl"
             },
             "chars":{
-                "doc_pkl_path": "GOT_char_sent_embeddings.pkl"}},
+                "doc_pkl_path": "GOT_pkls/GOT_char_sent_embeddings.pkl"}},
         "text_summ_pkl_path":{
-            "episodes": "GOT_txt_summ_eps.pkl",
-            "chars": "GOT_txt_summ_chars.pkl"}
+            "episodes": "GOT_pkls/GOT_txt_summ_eps.pkl",
+            "chars": "GOT_pkls/GOT_txt_summ_chars.pkl"}
     },
     "The office us":{
         "extension": "Season-{}",
         "seasons": 2,
-        "pickle_path": "Office_Pickle.pkl",
+        "pickle_path": "Office_pkls/Office_Pickle.pkl",
         "character_config": "The_Office_Characters.json",
         "num_characters": 20,
         "remove_chars": ["", "MAN"],
         "remove_links": ["https://genius.com/The-office-us-basketball-annotated", "https://genius.com/The-office-us-hot-girl-annotated"],
         "embeddings":{
             "episodes":{
-                "sentence_pkl_path": "office_sentence_embeddings.pkl",
-                "doc_pkl_path": "office_doc_embeddings.pkl"
+                "sentence_pkl_path": "Office_pkls/office_sentence_embeddings.pkl",
+                "doc_pkl_path": "Office_pkls/office_doc_embeddings.pkl"
             },
             "chars":{
-                "doc_pkl_path": "Office_char_sent_embeddings.pkl"}},
+                "doc_pkl_path": "Office_pkls/Office_char_sent_embeddings.pkl"}},
         "text_summ_pkl_path":{
-            "episodes": "office_txt_summ_eps.pkl",
-            "chars": "office_txt_summ_chars.pkl"}
+            "episodes": "Office_pkls/office_txt_summ_eps.pkl",
+            "chars": "Office_pkls/office_txt_summ_chars.pkl"}
     }
 }

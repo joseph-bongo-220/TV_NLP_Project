@@ -16,6 +16,7 @@
     </div>
     <div class="navbar-nav mr-auto">
         <p>
+            Seasons Available:
             {% for char in characters %}
                 <a class="nav-item nav-link" href="{{ url_for('get_character_info',show=show_selected,character=char) }}">{{ char }}</a>
             {% endfor %}
