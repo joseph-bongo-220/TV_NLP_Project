@@ -1,18 +1,38 @@
 {
     "app":{
         "debug": true,
+        "use_reloader": false,
         "base_url": "https://genius.com/albums/",
-        "position_cutoff": 5000,
-        "graph_cutoff": 500,
-        "ngrams": [1,2],
-        "take_top": 50,
-        "measure": "pagerank",
-        "pickle": true,
+        "use_s3": true,
         "json": false,
         "shows": ["Game of thrones", "The office us"],
         "min_fuzzy_matching_ratio": 90,
         "min_partial_fuzzy_matching_ratio": 100,
-        "DAN_sentence_encoder_url": "https://tfhub.dev/google/universal-sentence-encoder/2"
+        "DAN_sentence_encoder_url": "https://tfhub.dev/google/universal-sentence-encoder/2",
+        "JBRank":{
+            "ngrams": [1,2,3],
+            "position_cutoff": 5000,
+            "graph_cutoff": 500,
+            "take_top": 50,
+            "measure": "pagerank",
+            "remove_stopwords": true
+        },
+        "text_summarization":{
+            "sentence_similarity_threshold": 0.3,
+            "sentences": 6,
+            "order_by_occurence": true,
+            "measure": "pagerank"
+        },
+        "text_similarity":{
+            "take_top": 10
+        }
+
+    },
+    "aws":{
+        "Dynamo_Table": "tv-show-result",
+        "partition_key": "-name-",
+        "s3_bucket_name": "jb-s3-bucket",
+        "files_to_s3": ["GOT_sentence_embeddings.pkl", "office_sentence_embeddings.pkl", "GOT_Pickle.pkl", "Office_Pickle.pkl"]
     },
     "Game of thrones":{
         "extension": "Season-{}-scripts",
@@ -25,13 +45,12 @@
         "embeddings":{
             "episodes":{
                 "sentence_pkl_path": "GOT_sentence_embeddings.pkl",
-                "doc_pkl_path": "GOT_doc_embeddings.pkl"
+                "doc_data_name": "GOT_doc_embeddings"
             },
             "chars":{
-                "doc_pkl_path": "GOT_char_sent_embeddings.pkl"}},
-        "text_summ_pkl_path":{
-            "episodes": "GOT_txt_summ_eps.pkl",
-            "chars": "GOT_txt_summ_chars.pkl"}
+                "doc_data_name": "GOT_char_sent_embeddings"}},
+        "text_summ_name":{
+            "episodes": "GOT_txt_summ_eps"}
     },
     "The office us":{
         "extension": "Season-{}",
@@ -44,12 +63,11 @@
         "embeddings":{
             "episodes":{
                 "sentence_pkl_path": "office_sentence_embeddings.pkl",
-                "doc_pkl_path": "office_doc_embeddings.pkl"
+                "doc_data_name": "office_doc_embeddings"
             },
             "chars":{
-                "doc_pkl_path": "Office_char_sent_embeddings.pkl"}},
-        "text_summ_pkl_path":{
-            "episodes": "office_txt_summ_eps.pkl",
-            "chars": "office_txt_summ_chars.pkl"}
+                "doc_data_name": "Office_char_sent_embeddings"}},
+        "text_summ_name":{
+            "episodes": "office_txt_summ_eps"}
     }
 }

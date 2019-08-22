@@ -9,7 +9,7 @@
            <nav class="navbar navbar-expand-md navbar-dark bg-steel fixed-top">
                <p>
                   <div class="container">
-                     <a class="navbar-brand mr-4" href="/">TV NLP WebApp</a>
+                     <a class="navbar-brand mr-4" href="/">Home Page</a>
                   </div>
                </p>
             </nav>
@@ -19,17 +19,7 @@
               <option value="{{ url_for('get_show_info',show=show)}}">{{ show }}</option>
             {% endfor %}
          </select>
-         {% block selected %}{% endblock selected %}
-         </select>
-         <div class="container">
-         <div class="collapse navbar-collapse" id="navbarToggle">
-            <div class="navbar-nav mr-auto">
-                <p>
-                    <a class="nav-item nav-link" href="/">Home</a>
-                </p>
-            </div>
-         </div>
-         </div>
+         {% block selected %}{% endblock selected %}      
          {% block links %}{% endblock links %}
       </body>
    </body>

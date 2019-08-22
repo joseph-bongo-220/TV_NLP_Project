@@ -11,28 +11,28 @@ import json
 config = get_config()
 
 def get_NLP_results():
-    shows = [x for x in config.keys() if x!= 'app']
+    shows = [x for x in config.keys() if x not in ['app', "aws"]]
     result_dict = {}
     for show in shows:
         print(show)
         show_dict={}
-        pick = config["app"]["pickle"]
-        episodes, season_dict = NLP.process_episodes(show, Pickle=pick)
+        pick = config["app"]["use_s3"]
+        episodes, season_dict = NLP.process_episodes(show, S3=pick)
         print("episodes processed")
         show_dict.update({"seasons": season_dict})
-        ngrams = config["app"]["ngrams"]
+        ngrams = config["app"]["JBRank"]["ngrams"]
         ep_rank=JBRank(docs=episodes, ngrams=ngrams)
         ep_rank.run()
         show_dict.update({"episode_keyphrases": ep_rank.final_rankings})
 
         num_char = config[show]["num_characters"]
-        characters=NLP.process_characters(show, num_char=num_char, Pickle=pick)
+        characters=NLP.process_characters(show, num_char=num_char, S3=pick)
         print("chars processed")
         char_rank=JBRank(docs=characters, ngrams=ngrams)
         char_rank.run()
         show_dict.update({"character_keyphrases": char_rank.final_rankings})
 
-        ep_algs = SemanticAlgos(episodes, doc_type="episodes", show=show)
+        ep_algs = SemanticAlgos(episodes, doc_type="episodes", sent_threshold=config["app"]["text_summarization"]["sentence_similarity_threshold"], show=show)
         start = time.time()
         show_dict.update({"episode_text_similarity": ep_algs.text_similarity()})
         end = time.time()

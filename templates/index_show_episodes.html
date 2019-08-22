@@ -5,10 +5,11 @@
     </p>
     <div class="navbar-nav mr-auto">
         <p>
+            Episodes Available:
             {% for ep in episodes %}
                 <a  class="nav-item nav_link" href="{{ url_for('get_episode_info',show=show_selected,season=season_selected,episode=ep)}}" SELECTED>{{ep}}</option>
             {% endfor %}
-        </select>
+        </p>
     </div>
     {% block eps %}{% endblock eps %}  
     {% block info %}{% endblock info %}   
