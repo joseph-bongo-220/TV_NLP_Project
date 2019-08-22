@@ -19,11 +19,15 @@ from Scraper import correct_characters
 import math
 import sys
 from helper import second, flatten, sort_dict, smallest_distance
-from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions
+from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions, remove_x_chars_or_less
 from app_config import get_config
 import os
 from sklearn.metrics import pairwise_distances
 from scipy.spatial.distance import cosine
+import boto3
+from botocore.exceptions import ClientError, ParamValidationError
+import aws_functions as aws
+from copy import deepcopy
 
 import tensorflow as tf 
 import tensorflow_hub as hub
@@ -32,32 +36,29 @@ config = get_config()
 
 def get_pickle_data_frames(show, seasons=None):
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
-    pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
     path = config[show]["pickle_path"]
-
-    if path in pickle_files:
-        print("Pulling Pickle Data")
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
-    else:
-        print("Gathering Data from Genius.com")
-        Scraper = Genius_TV_Scraper(show=show, seasons=seasons)
-        data = Scraper.get_scripts()
-        data.to_pickle(path)
+    s3 = boto3.client("s3")
+    data = aws.get_s3_script_data(show=show, client=s3, path=path, seasons=seasons)
     return data
 
-def process_episodes(show, seasons=None, Pickle=True):
-    if Pickle:
+def process_episodes(show, seasons=None, S3=True):
+    if S3:
         data = get_pickle_data_frames(show=show, seasons=seasons)
 
     else:
-        print("Running A Clean Scrape")
+        path=config[show]["pickle_path"]
+        bucket_name=config["aws"]["s3_bucket_name"]
+        s3_path = path
+
         print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
         #scrape previously specified show and seasons
         data = scraper.get_scripts()
+        data.to_pickle(path)
+        self.s3.upload_file(path, bucket_name, s3_path)
+        os.remove(path)
 
     #get episodes from data
     data=correct_characters(data, show)
@@ -87,20 +88,24 @@ def process_episodes(show, seasons=None, Pickle=True):
 
     return docs, season_dict
 
-def process_characters(show, seasons=None, num_char=50, Pickle=False):
-    if Pickle:
-        print("Pulling Pickle Data")
-        pickle_path = config[show]["pickle_path"]
-        with open(pickle_path, 'rb') as f:
-            data = pickle.load(f)
+def process_characters(show, seasons=None, num_char=50, S3=True):
+    if S3:
+        data = get_pickle_data_frames(show=show, seasons=seasons)
 
-    else:
+    else:        
+        path=config[show]["pickle_path"]
+        bucket_name=config["aws"]["s3_bucket_name"]
+        s3_path = path
+
         print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
         #scrape previously specified show and seasons
         data = scraper.get_scripts()
+        data.to_pickle(path)
+        self.s3.upload_file(path, bucket_name, s3_path)
+        os.remove(path)
     
     #get characters from data
     data=correct_characters(data, show)
@@ -151,13 +156,16 @@ class JBRank(object):
             word_list = replace_numbers(word_list)
             
             self.tokenized_docs.append(word_list)
-            
-            BOW = self.get_BOW_TF(word_list)
+            word_list_2 = remove_stopwords(word_list)
+            word_list_2 = remove_x_chars_or_less(word_list_2, 2)
+            BOW = self.get_BOW_TF(word_list_2)
             
             self.grams=[x for x in ngrams if x >=2 and x<=6]
             
             for size in self.grams:
                 tokenized_ngrams = ["_".join(word_list[x:x+size]) for x in range(len(word_list)) if len(word_list[x:x+size])== size]
+                if config["app"]["JBRank"]["remove_stopwords"]:
+                    tokenized_ngrams = remove_stopwords(tokenized_ngrams)
                 NBOW = self.get_BOW_TF(tokenized_ngrams)
                 BOW.update(NBOW)
             
@@ -328,12 +336,13 @@ class JBRank(object):
 
     def run(self):
         self.stats()
-        measure = config["app"]["measure"]
+        measure = config["app"]["JBRank"]["measure"]
         self.graph(measure=measure)
 
 class SemanticAlgos(object):
     def __init__(self, docs, doc_type, sent_threshold = .3, show="Game of thrones"):
         cList = get_contractions()
+
         self.sent_threshold = sent_threshold
         self.tokenized_sents=[]
         self.cleaned_docs={}
@@ -343,14 +352,11 @@ class SemanticAlgos(object):
         self.sentence_dists={}
         self.show=show
         self.doc_type=doc_type
+        self.s3 = boto3.client("s3")
+        self.bucket_name = config["aws"]["s3_bucket_name"]
+        self.dynamo = boto3.resource('dynamodb')
 
-        all_pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
-        embedding_pickles = []
-        for show_ in config["app"]["shows"]:
-            embedding_pickles.extend([config[show_]["embeddings"]["chars"]["doc_pkl_path"], config[show_]["embeddings"]["episodes"]["doc_pkl_path"], config[show_]["embeddings"]["episodes"]["sentence_pkl_path"]])
-
-        if set(embedding_pickles).issubset(set(all_pickle_files))==False:
-            self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
+        self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
 
         for doc_dict in docs:
             key_ = list(doc_dict.keys())[0]
@@ -381,38 +387,43 @@ class SemanticAlgos(object):
         separators="[\.|?|!|\n]"
         return [x.strip() for x in re.split(separators, doc) if x != ""]
 
-    def get_sentence_embeddings(self):
-        pickle_path=config[self.show]["embeddings"][self.doc_type]["sentence_pkl_path"]
-        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
-        if pickle_path in pickle_files:
-            print("Gathering serialized sentences")
-            with open(pickle_path, 'rb') as f:
-                self.sentence_embeddings = pickle.load(f)
-        else:
-            i=1
-            with tf.Session() as session:
-                session.run([tf.global_variables_initializer(), tf.tables_initializer()])
-                for title, doc in self.cleaned_docs.items():
-                    self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
-                    if title not in list(self.sentence_embeddings.keys()):
-                        print("Gathering Tensorflow Embedding")
-                        sents = SemanticAlgos.tokenize_sentences(doc)
-                        sent_embeddings = session.run(self.embed(sents))
-                        sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
-                        self.sentence_embeddings.update({title: sents_dict})
-                        print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
-                        i = i+1
-            with open(pickle_path, 'wb') as handle:
-                pickle.dump(self.sentence_embeddings, handle)
+    def get_sentence_embeddings(self, s3_path=None):
+        path = config[self.show]["embeddings"][self.doc_type]["sentence_pkl_path"]
+        
+        if s3_path is None:
+            s3_path=path
+
+        try:
+            obj = self.s3.get_object(Bucket=self.bucket_name, Key=s3_path)
+            self.sentence_embeddings = pickle.loads(obj['Body'].read())
+        except ClientError as ex:
+            if ex.response["Error"]["Code"] == 'NoSuchKey':
+                i=1
+                with tf.Session() as session:
+                    session.run([tf.global_variables_initializer(), tf.tables_initializer()])
+                    for title, doc in self.cleaned_docs.items():
+                        self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
+                        if title not in list(self.sentence_embeddings.keys()):
+                            print("Gathering Tensorflow Embedding")
+                            sents = SemanticAlgos.tokenize_sentences(doc)
+                            sent_embeddings = session.run(self.embed(sents))
+                            sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
+                            self.sentence_embeddings.update({title: sents_dict})
+                            print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
+                            i = i+1
+                with open(path, 'wb') as handle:
+                    pickle.dump(self.sentence_embeddings, handle)
+                self.s3.upload_file(path, self.bucket_name, s3_path)
+                os.remove(path)
+            else:
+                raise ex
 
     def get_doc_embeddings(self):
-        pickle_path=config[self.show]["embeddings"][self.doc_type]["doc_pkl_path"]
-        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
-        if pickle_path in pickle_files:
-            print("Gathering serialized documents")
-            with open(pickle_path, 'rb') as handle:
-                self.doc_embeddings = pickle.load(handle)
-        else:
+        self.doc_embeddings=aws.get_dynamo_data(item=config[self.show]["embeddings"][self.doc_type]["doc_data_name"], table=config["aws"]["Dynamo_Table"], resource=self.dynamo, embedding=True)
+
+        if self.doc_embeddings=="No Response":
+            print("Generating New Document Embeddings")
+            self.doc_embeddings={}
             i=1
             with tf.Session() as session:
                 session.run([tf.global_variables_initializer(), tf.tables_initializer()])
@@ -423,17 +434,18 @@ class SemanticAlgos(object):
                         self.doc_embeddings.update({title: embeddings[0]})
                         print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
                         i = i+1
-            with open(pickle_path, 'wb') as handle:
-                pickle.dump(self.doc_embeddings, handle)
 
-    def graph_text_summarization(self, top_sents=6, measure="pagerank", order_by_occurence=True, use_pkl=True):
+            dynamo_embeddings = deepcopy(self.doc_embeddings)
+            dynamo_embeddings = aws.handle_numpy(dynamo_embeddings)
+            dynamo_embeddings.update({config["aws"]["partition_key"]:config[self.show]["embeddings"][self.doc_type]["doc_data_name"]})
+            dynamo_table = self.dynamo.Table(config["aws"]["Dynamo_Table"])
+            dyname_table.put_item(Item=dynamo_embeddings)
+
+    def graph_text_summarization(self, top_sents=config["app"]["text_summarization"]["sentences"], measure=config["app"]["text_summarization"]["measure"], order_by_occurence=config["app"]["text_summarization"]["order_by_occurence"]):
         """Text Summarization Algorithm that I wrote based on LexRank paper. More info will follow in README"""
-        pickle_path=config[self.show]["text_summ_pkl_path"][self.doc_type]
-        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
-        if use_pkl and pickle_path in pickle_files:
-            with open(pickle_path, 'rb') as handle:
-                results = pickle.load(handle)
-        else:
+        item=config[self.show]["text_summ_name"][self.doc_type]
+        results = aws.get_dynamo_data(item=item, table=config["aws"]["Dynamo_Table"], resource=self.dynamo)
+        if results == "No Response":
             results={}
             self.get_sentence_embeddings()
             for title, sent_embed in self.sentence_embeddings.items():
@@ -464,11 +476,11 @@ class SemanticAlgos(object):
                     summary_dict = sorted_gr_dict
                 # sentences = [sent_embed[key] for key,value in sorted_gr_dict]
                 results.update({title:list(summary_dict.keys())})
-            with open(pickle_path, 'wb') as handle:
-                pickle.dump(results, handle)
+            dynamo_table = self.dynamo.Table(config["aws"]["Dynamo_Table"])
+            dyname_table.put_item(Item=results)
         return(results)
 
-    def text_similarity(self, take_top=10):
+    def text_similarity(self, take_top=config["app"]["text_similarity"]["take_top"]):
         results={}
         self.get_doc_embeddings()
         doc_titles = list(self.doc_embeddings.keys())

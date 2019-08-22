@@ -11,7 +11,7 @@ results = get_NLP_results()
 end = time.time()
 print("Total time " + str(end-start))
 
-shows = ["--SELECT A SHOW--"]+[x for x in config.keys() if x!= 'app']
+shows = ["--SELECT A SHOW--"]+[x for x in config.keys() if x not in ['app', 'aws']]
 
 @app.route('/', methods=['GET'])
 def index():

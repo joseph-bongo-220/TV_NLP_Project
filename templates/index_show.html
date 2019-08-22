@@ -7,6 +7,8 @@
 {% block links %}
     <div class="navbar-nav mr-auto">
         <p>
+            Seasons Available:
+
             {% for value in seasons.values() %}
                 {% for season in value %}
                     <a class="nav-item nav-link" href="{{ url_for('get_episodes',show=show_selected,season=season) }}">{{ season }}</a>
@@ -16,7 +18,8 @@
     </div>
     <div class="navbar-nav mr-auto">
         <p>
-            Seasons Available:
+            Characters Available:
+
             {% for char in characters %}
                 <a class="nav-item nav-link" href="{{ url_for('get_character_info',show=show_selected,character=char) }}">{{ char }}</a>
             {% endfor %}
