@@ -21,15 +21,21 @@ def get_NLP_results():
         print("episodes processed")
         show_dict.update({"seasons": season_dict})
         ngrams = config["app"]["JBRank"]["ngrams"]
-        ep_rank=JBRank(docs=episodes, ngrams=ngrams)
+        start = time.time()
+        ep_rank=JBRank(docs=episodes, include_title=True, ngrams=ngrams)
         ep_rank.run()
+        end = time.time()
+        print("JBRank time " + str(end-start))
         show_dict.update({"episode_keyphrases": ep_rank.final_rankings})
 
         num_char = config[show]["num_characters"]
         characters=NLP.process_characters(show, num_char=num_char, S3=pick)
         print("chars processed")
-        char_rank=JBRank(docs=characters, ngrams=ngrams)
+        start = time.time()
+        char_rank=JBRank(docs=characters, include_title=False, ngrams=ngrams)
         char_rank.run()
+        end = time.time()
+        print("JBRank time " + str(end-start))
         show_dict.update({"character_keyphrases": char_rank.final_rankings})
 
         ep_algs = SemanticAlgos(episodes, doc_type="episodes", sent_threshold=config["app"]["text_summarization"]["sentence_similarity_threshold"], show=show)

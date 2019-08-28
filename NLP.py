@@ -19,7 +19,7 @@ from Scraper import correct_characters
 import math
 import sys
 from helper import second, flatten, sort_dict, smallest_distance
-from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions, remove_x_chars_or_less
+from text_cleaning import *
 from app_config import get_config
 import os
 from sklearn.metrics import pairwise_distances
@@ -68,12 +68,11 @@ def process_episodes(show, seasons=None, S3=True):
         if i not in z:
             z.append(i)
 
-    docs=[]
+    docs={}
     for episode in z:
         df = data[data.Episode == episode]
         doc = " ".join(list(df["Line"]))
-        doc_dict = {episode: doc}
-        docs.append(doc_dict)
+        docs.update({episode: doc})
 
     season_dict = {"All": z}
     if seasons is None:
@@ -115,27 +114,32 @@ def process_characters(show, seasons=None, num_char=50, S3=True):
     char_counter=Counter(char_list)
     z = [x[0] for x in sorted(char_counter.items(), key=lambda x: x[1], reverse=True)][0:num_char]
 
-    docs=[]
+    docs={}
     for char in z:
         df = data[data.Character_Name == char]
         char_text = " ".join(list(df["Line"]))
-        doc_dict = {char: char_text}
-        docs.append(doc_dict)
-
+        docs.update({char: char_text})
     return docs
 
 class JBRank(object):
     """Keyphrase Extraction Algorithm that I wrote based on unsupervised SGRank paper. More info will follow in README"""
-    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones", correct_subsum=False):
+    def __init__(self, docs, include_title=False, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones", correct_subsum=False):
+        if isinstance(docs, dict) == False:
+            raise TypeError("Documents must be in the form of a dictionary")
+        
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
         self.doc_titles=[]
+        self.include_title = include_title
     
-        for doc_dict in docs:
-            self.doc_titles.append(list(doc_dict.keys())[0])
-            doc = list(doc_dict.values())[0]
+        for key, value in docs.items():
+            self.doc_titles.append(key)
+            doc = value
             doc = doc.lower()
+
+            if self.include_title:
+                doc = key.lower()+". "+doc
             
             for x in list(cList.keys()):
                 doc = re.sub(x, cList[x], doc)
@@ -145,10 +149,11 @@ class JBRank(object):
             doc = re.sub(" m'", " my ", doc)
             doc = re.sub(" d'", " do ", doc)
             doc = re.sub(" s ", "s ", doc)
+            doc = re.sub("[ ]{2,}", " ", doc)
             
             # Tokenize document
             word_list = word_tokenize(doc)
-            
+
             # Clean Text
             word_list = clean_text(word_list)
             
@@ -166,6 +171,7 @@ class JBRank(object):
                 tokenized_ngrams = ["_".join(word_list[x:x+size]) for x in range(len(word_list)) if len(word_list[x:x+size])== size]
                 if config["app"]["JBRank"]["remove_stopwords"]:
                     tokenized_ngrams = remove_stopwords(tokenized_ngrams)
+                    tokenized_ngrams = correct_possesives(tokenized_ngrams)
                 NBOW = self.get_BOW_TF(tokenized_ngrams)
                 BOW.update(NBOW)
             
@@ -190,14 +196,29 @@ class JBRank(object):
             tl_factor.update(self.get_TL(doc))
             for size in self.grams:
                 tokenized_ngrams = ["_".join(doc[x:x+size]) for x in range(len(doc)) if len(doc[x:x+size])== size]
+                tokenized_ngrams = correct_possesives(tokenized_ngrams)
                 PFO_factor.update(self.get_PFO(tokenized_ngrams, self.position_cutoff))
                 tl_factor.update(self.get_TL(tokenized_ngrams))
                 
         self.stat_ranking= self.tf_idf_list.copy()
         
         for i in range(len(self.stat_ranking)):
+            if self.include_title:
+                title = self.doc_titles[i]
+                title_words = word_tokenize(title)
+
+                title_ngrams=[]
+                sizes = [x for x in self.grams if x >=2 and x<=len(title_words)]
+                for size in sizes:
+                    title_ngrams = title_ngrams + ["_".join(title_words[x:x+size]) for x in range(len(title_words)) if len(title_words[x:x+size])== size]
+
+                title_terms = title_words+title_ngrams
+
             for key, val in self.stat_ranking[i].items():
                 self.stat_ranking[i][key]=val*PFO_factor[key]*tl_factor[key]
+                if self.include_title:
+                    if key in title_terms:
+                        self.stat_ranking[i][key]=self.stat_ranking[i][key]*config["app"]["JBRank"]["title_multiplier"] 
             self.stat_ranking[i] = sort_dict(self.stat_ranking[i])[:self.take_top]
             self.stat_ranking[i] = {key:value for key,value in self.stat_ranking[i]}
             
@@ -318,10 +339,13 @@ class JBRank(object):
             PFO_dict[key] = np.log(500+(cutoff_position/val)) 
         return PFO_dict
 
-    def get_TL(self, tokenized_doc):
+    def get_TL(self, tokenized_doc, decay=config["app"]["JBRank"]["term_len_decay"]):
         tl_dict={}
         for word in tokenized_doc:
-            tl_dict.update({word:np.log(len(re.findall("_", word))+2)})
+            if decay:
+                tl_dict.update({word:np.log(len(re.findall("_", word))+2)})
+            else:
+                tl_dict.update({word:len(re.findall("_", word))+1})
             
         return tl_dict
 
@@ -341,6 +365,9 @@ class JBRank(object):
 
 class SemanticAlgos(object):
     def __init__(self, docs, doc_type, sent_threshold = .3, show="Game of thrones"):
+        if isinstance(docs, dict) == False:
+            raise TypeError("Documents must be in the form of a dictionary")
+        
         cList = get_contractions()
 
         self.sent_threshold = sent_threshold
@@ -358,10 +385,10 @@ class SemanticAlgos(object):
 
         self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
 
-        for doc_dict in docs:
-            key_ = list(doc_dict.keys())[0]
-            self.doc_titles.append(key_)
-            doc = list(doc_dict.values())[0]
+        for key, value in docs.items():
+            # key_ = list(doc_dict.keys())[0]
+            self.doc_titles.append(key)
+            doc = value
             doc = doc.lower()
             
             for x in list(cList.keys()):
@@ -374,7 +401,7 @@ class SemanticAlgos(object):
             doc = re.sub(" s ", "s ", doc)
             doc = re.sub("[ ]{2,}", " ", doc)
 
-            self.cleaned_docs.update({key_:doc})
+            self.cleaned_docs.update({key:doc})
 
     @staticmethod
     def load_TF_Universal_Sentence_Encoder():

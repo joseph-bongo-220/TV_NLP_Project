@@ -15,7 +15,9 @@
             "graph_cutoff": 500,
             "take_top": 50,
             "measure": "pagerank",
-            "remove_stopwords": true
+            "remove_stopwords": true,
+            "term_len_decay": false,
+            "title_multiplier": 3
         },
         "text_summarization":{
             "sentence_similarity_threshold": 0.3,
