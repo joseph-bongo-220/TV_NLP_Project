@@ -1,0 +1,9 @@
+{% extends "index_show_info.html" %}  
+{% block textsum %}
+    <h3>
+        Summarization of Text:
+    </h3>
+    {% for sentence in text_summarization %}
+        <p>{{ sentence }}</p>
+    {% endfor %}
+{% endblock textsum %}

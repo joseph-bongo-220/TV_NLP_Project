@@ -19,43 +19,46 @@ from Scraper import correct_characters
 import math
 import sys
 from helper import second, flatten, sort_dict, smallest_distance
-from text_cleaning import clean_text, remove_stopwords, replace_numbers, get_contractions
+from text_cleaning import *
 from app_config import get_config
 import os
 from sklearn.metrics import pairwise_distances
 from scipy.spatial.distance import cosine
+import boto3
+from botocore.exceptions import ClientError, ParamValidationError
+import aws_functions as aws
+from copy import deepcopy
 
 import tensorflow as tf 
 import tensorflow_hub as hub
 
 config = get_config()
 
-def pickle_data_frames(show):
+def get_pickle_data_frames(show, seasons=None):
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
-    pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
     path = config[show]["pickle_path"]
+    s3 = boto3.client("s3")
+    data = aws.get_s3_script_data(show=show, client=s3, path=path, seasons=seasons)
+    return data
 
-    if path in pickle_files:
-        pass
-    else:
-        Scraper = Genius_TV_Scraper(show=show)
-        data = Scraper.get_scripts()
-        data.to_pickle(path)
-
-def process_episodes(show, seasons=None, Pickle=False):
-    if Pickle:
-        print("Pulling Pickle Data")
-        pickle_path = config[show]["pickle_path"]
-        with open(pickle_path, 'rb') as f:
-            data = pickle.load(f)
+def process_episodes(show, seasons=None, S3=True):
+    if S3:
+        data = get_pickle_data_frames(show=show, seasons=seasons)
 
     else:
+        path=config[show]["pickle_path"]
+        bucket_name=config["aws"]["s3_bucket_name"]
+        s3_path = path
+
         print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
         #scrape previously specified show and seasons
         data = scraper.get_scripts()
+        data.to_pickle(path)
+        self.s3.upload_file(path, bucket_name, s3_path)
+        os.remove(path)
 
     #get episodes from data
     data=correct_characters(data, show)
@@ -64,30 +67,44 @@ def process_episodes(show, seasons=None, Pickle=False):
     for i in list(data["Episode"]):
         if i not in z:
             z.append(i)
-    
-    docs=[]
+
+    docs={}
     for episode in z:
         df = data[data.Episode == episode]
         doc = " ".join(list(df["Line"]))
-        doc_dict = {episode: doc}
-        docs.append(doc_dict)
+        docs.update({episode: doc})
 
-    return docs
+    season_dict = {"All": z}
+    if seasons is None:
+        seasons = [i+1 for i in range(config[show]["seasons"])]
+    for i in seasons:
+        x = []
+        for j in list(data["Episode"][data["Season"]==i]):
+            if j not in x:
+                x.append(j)
 
-def process_characters(show, seasons=None, num_char=50, Pickle=False):
-    if Pickle:
-        print("Pulling Pickle Data")
-        pickle_path = config[show]["pickle_path"]
-        with open(pickle_path, 'rb') as f:
-            data = pickle.load(f)
+        season_dict.update({str(i): x})
 
-    else:
+    return docs, season_dict
+
+def process_characters(show, seasons=None, num_char=50, S3=True):
+    if S3:
+        data = get_pickle_data_frames(show=show, seasons=seasons)
+
+    else:        
+        path=config[show]["pickle_path"]
+        bucket_name=config["aws"]["s3_bucket_name"]
+        s3_path = path
+
         print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
         #scrape previously specified show and seasons
         data = scraper.get_scripts()
+        data.to_pickle(path)
+        self.s3.upload_file(path, bucket_name, s3_path)
+        os.remove(path)
     
     #get characters from data
     data=correct_characters(data, show)
@@ -97,26 +114,32 @@ def process_characters(show, seasons=None, num_char=50, Pickle=False):
     char_counter=Counter(char_list)
     z = [x[0] for x in sorted(char_counter.items(), key=lambda x: x[1], reverse=True)][0:num_char]
 
-    docs=[]
+    docs={}
     for char in z:
         df = data[data.Character_Name == char]
         char_text = " ".join(list(df["Line"]))
-        doc_dict = {char: char_text}
-        docs.append(doc_dict)
-
+        docs.update({char: char_text})
     return docs
 
 class JBRank(object):
-    def __init__(self, docs, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones"):
+    """Keyphrase Extraction Algorithm that I wrote based on unsupervised SGRank paper. More info will follow in README"""
+    def __init__(self, docs, include_title=False, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones", correct_subsum=False):
+        if isinstance(docs, dict) == False:
+            raise TypeError("Documents must be in the form of a dictionary")
+        
         cList = get_contractions()
         self.TF_list=[]
         self.tokenized_docs=[]
         self.doc_titles=[]
+        self.include_title = include_title
     
-        for doc_dict in docs:
-            self.doc_titles.append(list(doc_dict.keys())[0])
-            doc = list(doc_dict.values())[0]
+        for key, value in docs.items():
+            self.doc_titles.append(key)
+            doc = value
             doc = doc.lower()
+
+            if self.include_title:
+                doc = key.lower()+". "+doc
             
             for x in list(cList.keys()):
                 doc = re.sub(x, cList[x], doc)
@@ -126,10 +149,11 @@ class JBRank(object):
             doc = re.sub(" m'", " my ", doc)
             doc = re.sub(" d'", " do ", doc)
             doc = re.sub(" s ", "s ", doc)
+            doc = re.sub("[ ]{2,}", " ", doc)
             
             # Tokenize document
             word_list = word_tokenize(doc)
-            
+
             # Clean Text
             word_list = clean_text(word_list)
             
@@ -137,19 +161,24 @@ class JBRank(object):
             word_list = replace_numbers(word_list)
             
             self.tokenized_docs.append(word_list)
-            
-            BOW = self.get_BOW_TF(word_list)
+            word_list_2 = remove_stopwords(word_list)
+            word_list_2 = remove_x_chars_or_less(word_list_2, 2)
+            BOW = self.get_BOW_TF(word_list_2)
             
             self.grams=[x for x in ngrams if x >=2 and x<=6]
             
             for size in self.grams:
                 tokenized_ngrams = ["_".join(word_list[x:x+size]) for x in range(len(word_list)) if len(word_list[x:x+size])== size]
+                if config["app"]["JBRank"]["remove_stopwords"]:
+                    tokenized_ngrams = remove_stopwords(tokenized_ngrams)
+                    tokenized_ngrams = correct_possesives(tokenized_ngrams)
                 NBOW = self.get_BOW_TF(tokenized_ngrams)
                 BOW.update(NBOW)
             
             self.TF_list.append(BOW)
             
-            #self.TF_list=self.subsum_correction(TF_list)
+            if correct_subsum:
+                self.TF_list=self.subsum_correction(TF_list)
             
         IDF_list = self.get_BOW_IDF(self.TF_list)
         
@@ -167,14 +196,29 @@ class JBRank(object):
             tl_factor.update(self.get_TL(doc))
             for size in self.grams:
                 tokenized_ngrams = ["_".join(doc[x:x+size]) for x in range(len(doc)) if len(doc[x:x+size])== size]
+                tokenized_ngrams = correct_possesives(tokenized_ngrams)
                 PFO_factor.update(self.get_PFO(tokenized_ngrams, self.position_cutoff))
                 tl_factor.update(self.get_TL(tokenized_ngrams))
                 
         self.stat_ranking= self.tf_idf_list.copy()
         
         for i in range(len(self.stat_ranking)):
+            if self.include_title:
+                title = self.doc_titles[i]
+                title_words = word_tokenize(title)
+
+                title_ngrams=[]
+                sizes = [x for x in self.grams if x >=2 and x<=len(title_words)]
+                for size in sizes:
+                    title_ngrams = title_ngrams + ["_".join(title_words[x:x+size]) for x in range(len(title_words)) if len(title_words[x:x+size])== size]
+
+                title_terms = title_words+title_ngrams
+
             for key, val in self.stat_ranking[i].items():
                 self.stat_ranking[i][key]=val*PFO_factor[key]*tl_factor[key]
+                if self.include_title:
+                    if key in title_terms:
+                        self.stat_ranking[i][key]=self.stat_ranking[i][key]*config["app"]["JBRank"]["title_multiplier"] 
             self.stat_ranking[i] = sort_dict(self.stat_ranking[i])[:self.take_top]
             self.stat_ranking[i] = {key:value for key,value in self.stat_ranking[i]}
             
@@ -295,10 +339,13 @@ class JBRank(object):
             PFO_dict[key] = np.log(500+(cutoff_position/val)) 
         return PFO_dict
 
-    def get_TL(self, tokenized_doc):
+    def get_TL(self, tokenized_doc, decay=config["app"]["JBRank"]["term_len_decay"]):
         tl_dict={}
         for word in tokenized_doc:
-            tl_dict.update({word:np.log(len(re.findall("_", word))+2)})
+            if decay:
+                tl_dict.update({word:np.log(len(re.findall("_", word))+2)})
+            else:
+                tl_dict.update({word:len(re.findall("_", word))+1})
             
         return tl_dict
 
@@ -313,12 +360,16 @@ class JBRank(object):
 
     def run(self):
         self.stats()
-        measure = config["app"]["measure"]
+        measure = config["app"]["JBRank"]["measure"]
         self.graph(measure=measure)
 
 class SemanticAlgos(object):
-    def __init__(self, docs, sent_threshold = .3, show="Game of thrones"):
+    def __init__(self, docs, doc_type, sent_threshold = .3, show="Game of thrones"):
+        if isinstance(docs, dict) == False:
+            raise TypeError("Documents must be in the form of a dictionary")
+        
         cList = get_contractions()
+
         self.sent_threshold = sent_threshold
         self.tokenized_sents=[]
         self.cleaned_docs={}
@@ -327,13 +378,17 @@ class SemanticAlgos(object):
         self.sentence_embeddings={}
         self.sentence_dists={}
         self.show=show
+        self.doc_type=doc_type
+        self.s3 = boto3.client("s3")
+        self.bucket_name = config["aws"]["s3_bucket_name"]
+        self.dynamo = boto3.resource('dynamodb')
 
         self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
 
-        for doc_dict in docs:
-            key_ = list(doc_dict.keys())[0]
-            self.doc_titles.append(key_)
-            doc = list(doc_dict.values())[0]
+        for key, value in docs.items():
+            # key_ = list(doc_dict.keys())[0]
+            self.doc_titles.append(key)
+            doc = value
             doc = doc.lower()
             
             for x in list(cList.keys()):
@@ -346,10 +401,11 @@ class SemanticAlgos(object):
             doc = re.sub(" s ", "s ", doc)
             doc = re.sub("[ ]{2,}", " ", doc)
 
-            self.cleaned_docs.update({key_:doc})
+            self.cleaned_docs.update({key:doc})
 
     @staticmethod
     def load_TF_Universal_Sentence_Encoder():
+        print("Loading TensorFlow Universal Sentence Encoder")
         embed = hub.Module(config["app"]["DAN_sentence_encoder_url"])
         return embed
 
@@ -358,38 +414,43 @@ class SemanticAlgos(object):
         separators="[\.|?|!|\n]"
         return [x.strip() for x in re.split(separators, doc) if x != ""]
 
-    def get_sentence_embeddings(self):
-        pickle_path=config[self.show]["sentence_pkl_path"]
-        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
-        if pickle_path in pickle_files:
-            print("Gathering serialized sentences")
-            with open(pickle_path, 'rb') as f:
-                self.sentence_embeddings = pickle.load(f)
-        else:
-            i=1
-            with tf.Session() as session:
-                session.run([tf.global_variables_initializer(), tf.tables_initializer()])
-                for title, doc in self.cleaned_docs.items():
-                    self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
-                    if title not in list(self.sentence_embeddings.keys()):
-                        print("Gathering Tensorflow Embedding")
-                        sents = SemanticAlgos.tokenize_sentences(doc)
-                        sent_embeddings = session.run(self.embed(sents))
-                        sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
-                        self.sentence_embeddings.update({title: sents_dict})
-                        print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
-                        i = i+1
-            with open(pickle_path, 'wb') as handle:
-                pickle.dump(self.sentence_embeddings, handle)
+    def get_sentence_embeddings(self, s3_path=None):
+        path = config[self.show]["embeddings"][self.doc_type]["sentence_pkl_path"]
+        
+        if s3_path is None:
+            s3_path=path
+
+        try:
+            obj = self.s3.get_object(Bucket=self.bucket_name, Key=s3_path)
+            self.sentence_embeddings = pickle.loads(obj['Body'].read())
+        except ClientError as ex:
+            if ex.response["Error"]["Code"] == 'NoSuchKey':
+                i=1
+                with tf.Session() as session:
+                    session.run([tf.global_variables_initializer(), tf.tables_initializer()])
+                    for title, doc in self.cleaned_docs.items():
+                        self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
+                        if title not in list(self.sentence_embeddings.keys()):
+                            print("Gathering Tensorflow Embedding")
+                            sents = SemanticAlgos.tokenize_sentences(doc)
+                            sent_embeddings = session.run(self.embed(sents))
+                            sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
+                            self.sentence_embeddings.update({title: sents_dict})
+                            print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
+                            i = i+1
+                with open(path, 'wb') as handle:
+                    pickle.dump(self.sentence_embeddings, handle)
+                self.s3.upload_file(path, self.bucket_name, s3_path)
+                os.remove(path)
+            else:
+                raise ex
 
     def get_doc_embeddings(self):
-        pickle_path=config[self.show]["doc_pkl_path"]
-        pickle_files = [f for f in os.listdir('.') if os.path.isfile(f) and re.search(".pkl",f) is not None]
-        if pickle_path in pickle_files:
-            print("Gathering serialized documents")
-            with open(pickle_path, 'rb') as handle:
-                self.doc_embeddings = pickle.load(handle)
-        else:
+        self.doc_embeddings=aws.get_dynamo_data(item=config[self.show]["embeddings"][self.doc_type]["doc_data_name"], table=config["aws"]["Dynamo_Table"], resource=self.dynamo, embedding=True)
+
+        if self.doc_embeddings=="No Response":
+            print("Generating New Document Embeddings")
+            self.doc_embeddings={}
             i=1
             with tf.Session() as session:
                 session.run([tf.global_variables_initializer(), tf.tables_initializer()])
@@ -400,51 +461,59 @@ class SemanticAlgos(object):
                         self.doc_embeddings.update({title: embeddings[0]})
                         print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
                         i = i+1
-            with open(pickle_path, 'wb') as handle:
-                pickle.dump(self.doc_embeddings, handle)
 
-    def graph_text_summarization(self, top_sents=6, measure="pagerank", order_by_occurence=True):
-        results={}
-        self.get_sentence_embeddings()
-        for title, sent_embed in self.sentence_embeddings.items():
-            # do graph stuff
-            dists = 1-pairwise_distances(list(sent_embed.values()), metric="cosine")
-            dists = pd.DataFrame(dists, index = list(sent_embed.keys()), columns=list(sent_embed.keys()))
-            G = nx.Graph()
-            G.add_nodes_from(list(dists.columns))
-            for i in list(dists.columns):
-                for j in list(dists.index):
-                    if i==j or math.isnan(dists[i][j]) or dists[i][j] < self.sent_threshold:
-                        pass
-                    else:
-                        G.add_edge(i, j, weight=dists[i][j])
-                        dists[j][i]=None
-            if measure == "pagerank":
-                gr_dict=nx.pagerank(G)
-            elif measure == "betweenness centrality":
-                gr_dict=nx.betweenness_centrality(G, weight="weight")
-            elif measure == "load centrality":
-                gr_dict=nx.load_centrality(G, weight="weight")
-            temp_dict = sort_dict(gr_dict)
-            sorted_gr_dict = temp_dict[0:top_sents]
-            sorted_gr_dict = {key:value for key,value in sorted_gr_dict}
-            if order_by_occurence:
-                summary_dict = {x:gr_dict[x] for x in list(gr_dict.keys()) if x in list(sorted_gr_dict.keys())}
-            else:
-                summary_dict = sorted_gr_dict
-            # sentences = [sent_embed[key] for key,value in sorted_gr_dict]
-            results.update({title:list(summary_dict.keys())})
+            dynamo_embeddings = deepcopy(self.doc_embeddings)
+            dynamo_embeddings = aws.handle_numpy(dynamo_embeddings)
+            dynamo_embeddings.update({config["aws"]["partition_key"]:config[self.show]["embeddings"][self.doc_type]["doc_data_name"]})
+            dynamo_table = self.dynamo.Table(config["aws"]["Dynamo_Table"])
+            dyname_table.put_item(Item=dynamo_embeddings)
+
+    def graph_text_summarization(self, top_sents=config["app"]["text_summarization"]["sentences"], measure=config["app"]["text_summarization"]["measure"], order_by_occurence=config["app"]["text_summarization"]["order_by_occurence"]):
+        """Text Summarization Algorithm that I wrote based on LexRank paper. More info will follow in README"""
+        item=config[self.show]["text_summ_name"][self.doc_type]
+        results = aws.get_dynamo_data(item=item, table=config["aws"]["Dynamo_Table"], resource=self.dynamo)
+        if results == "No Response":
+            results={}
+            self.get_sentence_embeddings()
+            for title, sent_embed in self.sentence_embeddings.items():
+                # do graph stuff
+                dists = 1-pairwise_distances(list(sent_embed.values()), metric="cosine")
+                dists = pd.DataFrame(dists, index = list(sent_embed.keys()), columns=list(sent_embed.keys()))
+                G = nx.Graph()
+                G.add_nodes_from(list(dists.columns))
+                for i in list(dists.columns):
+                    for j in list(dists.index):
+                        if i==j or math.isnan(dists[i][j]) or dists[i][j] < self.sent_threshold:
+                            pass
+                        else:
+                            G.add_edge(i, j, weight=dists[i][j])
+                            dists[j][i]=None
+                if measure == "pagerank":
+                    gr_dict=nx.pagerank(G)
+                elif measure == "betweenness centrality":
+                    gr_dict=nx.betweenness_centrality(G, weight="weight")
+                elif measure == "load centrality":
+                    gr_dict=nx.load_centrality(G, weight="weight")
+                temp_dict = sort_dict(gr_dict)
+                sorted_gr_dict = temp_dict[0:top_sents]
+                sorted_gr_dict = {key:value for key,value in sorted_gr_dict}
+                if order_by_occurence:
+                    summary_dict = {x:gr_dict[x] for x in list(gr_dict.keys()) if x in list(sorted_gr_dict.keys())}
+                else:
+                    summary_dict = sorted_gr_dict
+                # sentences = [sent_embed[key] for key,value in sorted_gr_dict]
+                results.update({title:list(summary_dict.keys())})
+            dynamo_table = self.dynamo.Table(config["aws"]["Dynamo_Table"])
+            dyname_table.put_item(Item=results)
         return(results)
 
-    def text_similarity(self, take_top=10):
+    def text_similarity(self, take_top=config["app"]["text_similarity"]["take_top"]):
         results={}
         self.get_doc_embeddings()
         doc_titles = list(self.doc_embeddings.keys())
         doc_embeddings = list(self.doc_embeddings.values())
-        print(doc_embeddings[0:5])
         dists=1-pairwise_distances(doc_embeddings, metric="cosine")
         for i in range(len(dists)):
-            print(str(i))
             similarity_dict={}
             for j in range(len(dists)):
                 if i == j:
@@ -458,3 +527,8 @@ class SemanticAlgos(object):
         # final_results=temp_results[0:take_top]
         # final_results= {key:value for key,value in final_results}
         return(results)
+
+if __name__ == "__main__":
+    show = "Game of thrones"
+    data = get_pickle_data_frames(show=show)
+    print(set([x for x in data["Episode"]]))

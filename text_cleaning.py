@@ -1,6 +1,7 @@
 import nltk
 nltk.download('punkt')
-nltk.download('stopwords')
+# nltk.download('stopwords')
+from nltk.corpus import stopwords
 import re
 import inflect
 
@@ -15,10 +16,17 @@ def clean_text(words):
 
 def remove_stopwords(words):
     """Removes English Stopwords"""
-    new_words = []
-    for word in words:
-        if word not in stopwords.words('english'):
-            new_words.append(word)
+    stop_list = stopwords.words('english')+["l"]
+    new_words=[word for word in words if word.split("_")[0] not in stop_list and word.split("_")[-1] not in stop_list]
+    return new_words
+
+def correct_possesives(words):
+    new_words= [re.sub("_s_", "s_", word) for word in words]
+    new_words= [re.sub("_s$", "s", word) for word in new_words]
+    return new_words
+
+def remove_x_chars_or_less(words,x):
+    new_words = [word for word in words if len(word)>x]
     return new_words
 
 def replace_numbers(words):

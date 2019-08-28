@@ -1,0 +1,16 @@
+{% extends "index_show.html" %} 
+{% block links %}
+    <p>
+        You have selected {{season_selected}}
+    </p>
+    <div class="navbar-nav mr-auto">
+        <p>
+            Episodes Available:
+            {% for ep in episodes %}
+                <a  class="nav-item nav_link" href="{{ url_for('get_episode_info',show=show_selected,season=season_selected,episode=ep)}}" SELECTED>{{ep}}</option>
+            {% endfor %}
+        </p>
+    </div>
+    {% block eps %}{% endblock eps %}  
+    {% block info %}{% endblock info %}   
+{% endblock links %}

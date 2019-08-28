@@ -1,49 +1,30 @@
-<!DOCTYPE html>
-<html>
-   <head>
-      <title>Title of the document</title>
-   </head>
-   <body>
-        <body>
-         <header class="site-header">
-           <nav class="navbar navbar-expand-md navbar-dark bg-steel fixed-top">
-               <p>
-                  <div class="container">
-                     <a class="navbar-brand mr-4" href="/">TV NLP WebApp</a>
-                  </div>
-               </p>
-            </nav>
-         </header>
-         <select name="show" onchange="location = this.value;">
-            {% for show in shows %}
-              <option value="{{ url_for('get_show_info',show=show)}}">{{show}}</option>
-            {% endfor %}
-         </select>
-         <p>
-             You have selected {{show_selected}}
-         </p>
-         <div class="container">
-            <div class="collapse navbar-collapse" id="navbarToggle">
-               <div class="navbar-nav mr-auto">
-                  <p>
-                     <a class="nav-item nav-link" href="/">Home</a>
-                     <a class="nav-item nav-link" href="/username">UserName</a>
-                  </p>
-               </div>
-            </div>
-         </div>
-         <div class="container">
-            <select name="season" method="POST" action="/">
-                {% for value in seasons.values() %}
-                    {% for season in value %}
-                        <option value="{{season}}" SELECTED>{{season}}</option>
-                    {% endfor %}
+{% extends "index.html" %}
+{% block selected %}
+    <p>
+        You have selected {{show_selected}}
+    </p>
+{% endblock selected %}
+{% block links %}
+    <div class="navbar-nav mr-auto">
+        <p>
+            Seasons Available:
+
+            {% for value in seasons.values() %}
+                {% for season in value %}
+                    <a class="nav-item nav-link" href="{{ url_for('get_episodes',show=show_selected,season=season) }}">{{ season }}</a>
                 {% endfor %}
-            </select>
-         </div>
-      </body>
-   </body>
-   <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
-   <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
-   <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
-</html>
+            {% endfor %}
+        </p>
+    </div>
+    <div class="navbar-nav mr-auto">
+        <p>
+            Characters Available:
+
+            {% for char in characters %}
+                <a class="nav-item nav-link" href="{{ url_for('get_character_info',show=show_selected,character=char) }}">{{ char }}</a>
+            {% endfor %}
+        </p>
+    </div>
+    {% block eps %}{% endblock eps %}  
+    {% block info %}{% endblock info %}
+{% endblock links %}

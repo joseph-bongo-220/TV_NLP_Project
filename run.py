@@ -6,52 +6,57 @@ from Scraper import Genius_TV_Scraper, correct_characters
 import pickle
 from Scraper import correct_characters
 import time
-
+import json
 
 config = get_config()
 
-if __name__ == '__main__':
-    shows = [x for x in config.keys() if x!= 'app']
+def get_NLP_results():
+    shows = [x for x in config.keys() if x not in ['app', "aws"]]
     result_dict = {}
     for show in shows:
+        print(show)
         show_dict={}
-        pick = config["app"]["pickle"]
-        episodes = NLP.process_episodes(show, Pickle=pick)
+        pick = config["app"]["use_s3"]
+        episodes, season_dict = NLP.process_episodes(show, S3=pick)
         print("episodes processed")
+        show_dict.update({"seasons": season_dict})
+        ngrams = config["app"]["JBRank"]["ngrams"]
         start = time.time()
-        ngrams = config["app"]["ngrams"]
-        ep_rank=JBRank(docs=episodes, ngrams=ngrams)
+        ep_rank=JBRank(docs=episodes, include_title=True, ngrams=ngrams)
         ep_rank.run()
         end = time.time()
-        print(str(end-start))
+        print("JBRank time " + str(end-start))
         show_dict.update({"episode_keyphrases": ep_rank.final_rankings})
 
-        for i in list(ep_rank.final_rankings.keys()):
-            print(i)
-            print(ep_rank.final_rankings[i])
-
-        print ("*"*50)
-
         num_char = config[show]["num_characters"]
-        characters=NLP.process_characters(show, num_char=num_char, Pickle=pick)
+        characters=NLP.process_characters(show, num_char=num_char, S3=pick)
         print("chars processed")
         start = time.time()
-        char_rank=JBRank(docs=characters, ngrams=ngrams)
+        char_rank=JBRank(docs=characters, include_title=False, ngrams=ngrams)
         char_rank.run()
         end = time.time()
-        print(str(end-start))
+        print("JBRank time " + str(end-start))
         show_dict.update({"character_keyphrases": char_rank.final_rankings})
 
-        ep_algs = SemanticAlgos(episodes, show=show)
+        ep_algs = SemanticAlgos(episodes, doc_type="episodes", sent_threshold=config["app"]["text_summarization"]["sentence_similarity_threshold"], show=show)
+        start = time.time()
         show_dict.update({"episode_text_similarity": ep_algs.text_similarity()})
+        end = time.time()
+        print("Text similarity time " + str(end-start))
+        start = time.time()
         show_dict.update({"episode_text_summarization": ep_algs.graph_text_summarization()})
+        end = time.time()
+        print("Text summarization time " + str(end-start))
 
-        char_algs = SemanticAlgos(characters, show=show)
+        char_algs = SemanticAlgos(characters, doc_type="chars", show=show)
         show_dict.update({"character_dialogue_similarity": char_algs.text_similarity()})
-        show_dict.update({"character_dialogue_summarization": char_algs.graph_text_summarization()})
 
         result_dict.update({show: show_dict})
 
-        for i in list(char_rank.final_rankings.keys()):
-            print(i)
-            print(char_rank.final_rankings[i])
+    return(result_dict)
+
+if __name__ == '__main__':
+    start = time.time()
+    res = get_NLP_results()
+    end = time.time()
+    print("Total time " + str(end-start))

@@ -62,13 +62,15 @@ class Genius_TV_Scraper(object):
         """Get the scripts and return them as dataframes or JSON"""
         temp_show = re.sub(" ", "-", self.show)
         show_df = pd.DataFrame()
-
+        
+        s = 1
         for url in self.urls:
             season_df = pd.DataFrame()
             response = requests.get(url, timeout=5)
             content = BeautifulSoup(response.content, "html.parser")
             block = content.find_all("a", {"class": "u-display_block"}, href=True)
             links = [b.get("href") for b in block]
+            links = [l for l in links if l not in config[self.show]["remove_links"]]
 
             for link in links:
                 # use regex  and re.sub to extract episode from URL (THE OFFICE)
@@ -112,6 +114,7 @@ class Genius_TV_Scraper(object):
                             "Narration": lines,
                             "Show": [self.show for s in range(0, len(lines))],
                             "Episode": [episode.lower() for e in range(0, len(lines))],
+                            "Season": [s for i in range(0, len(lines))],
                             "URL": [link for l in range(0, len(lines))]}
 
                 ep_df = pd.DataFrame(data=ep_dict)
@@ -120,6 +123,7 @@ class Genius_TV_Scraper(object):
 
             show_df = pd.concat([show_df, season_df])
             show_df = show_df.reset_index(drop=True)
+            s=s+1
 
         if json == False:
             return(show_df)

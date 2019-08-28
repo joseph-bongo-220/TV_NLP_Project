@@ -1,4 +1,4 @@
-nltk==3.4
+nltk>=3.4.5
 networkx==2.2
 pandas==0.24.2
 numpy==1.16.2
@@ -9,3 +9,6 @@ tensorflow
 tensorflow_hub
 fuzzywuzzy==0.17.0
 flask
+sklearn
+scipy
+boto3

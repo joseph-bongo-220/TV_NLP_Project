@@ -1,0 +1,21 @@
+{% extends "index_show.html" %}
+{% block info %}
+    <div class="container">
+        <h1>
+            Selected: {{ entity_selected }}
+        </h1>
+        <h3>
+            Key Phrases:
+        </h3>
+        {% for phrase in keyphrases %}
+            <p>{{ phrase }}</p>
+        {% endfor %}
+        <h3>
+            Similarity of Text:
+        </h3>
+        {% for text in text_similarity %}
+            <p>{{ text }}</p>
+        {% endfor %}
+        {% block textsum %}{% endblock textsum %}
+    </div>
+{% endblock info %}

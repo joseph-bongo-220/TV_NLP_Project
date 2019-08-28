@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
    <head>
-      <title>Title of the document</title>
+      <title>Joseph Bongo TV NLP Web App</title>
    </head>
    <body>
       <body>
@@ -9,26 +9,18 @@
            <nav class="navbar navbar-expand-md navbar-dark bg-steel fixed-top">
                <p>
                   <div class="container">
-                     <a class="navbar-brand mr-4" href="/">TV NLP WebApp</a>
+                     <a class="navbar-brand mr-4" href="/">Home Page</a>
                   </div>
                </p>
             </nav>
          </header>
          <select name="show" onchange="location = this.value;">
             {% for show in shows %}
-              <option value="{{ url_for('get_show_info',show=show)}}">{{show}}</option>
+              <option value="{{ url_for('get_show_info',show=show)}}">{{ show }}</option>
             {% endfor %}
          </select>
-         <div class="container">
-            <div class="collapse navbar-collapse" id="navbarToggle">
-               <div class="navbar-nav mr-auto">
-                  <p>
-                     <a class="nav-item nav-link" href="/">Home</a>
-                     <a class="nav-item nav-link" href="/username">UserName</a>
-                  </p>
-               </div>
-            </div>
-         </div>
+         {% block selected %}{% endblock selected %}      
+         {% block links %}{% endblock links %}
       </body>
    </body>
    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
