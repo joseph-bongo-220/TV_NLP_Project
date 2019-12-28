@@ -15,6 +15,10 @@ def get_NLP_results():
     result_dict = {}
     for show in shows:
         print(show)
+        if show == "Game of thrones":
+            decay=True
+        else:
+            decay=False
         show_dict={}
         pick = config["app"]["use_s3"]
         episodes, season_dict = NLP.process_episodes(show, S3=pick)
@@ -22,7 +26,7 @@ def get_NLP_results():
         show_dict.update({"seasons": season_dict})
         ngrams = config["app"]["JBRank"]["ngrams"]
         start = time.time()
-        ep_rank=JBRank(docs=episodes, include_title=True, ngrams=ngrams)
+        ep_rank=JBRank(docs=episodes, include_title=True, term_len_decay=decay, ngrams=ngrams)
         ep_rank.run()
         end = time.time()
         print("JBRank time " + str(end-start))
@@ -32,7 +36,7 @@ def get_NLP_results():
         characters=NLP.process_characters(show, num_char=num_char, S3=pick)
         print("chars processed")
         start = time.time()
-        char_rank=JBRank(docs=characters, include_title=False, ngrams=ngrams)
+        char_rank=JBRank(docs=characters, include_title=False, term_len_decay=decay, ngrams=ngrams)
         char_rank.run()
         end = time.time()
         print("JBRank time " + str(end-start))
