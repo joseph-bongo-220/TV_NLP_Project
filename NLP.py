@@ -66,13 +66,11 @@ def process_episodes(show, seasons=None, S3=True):
     z = []
     for i in list(data["Episode"]):
         if i not in z:
-            i = re.sub("^season [^ ]* episode [^ ]* ", "", i)
             z.append(i)
 
     docs={}
     for episode in z:
         df = data[data.Episode == episode]
-        episode = re.sub("^season [^ ]* episode [^ ]* ", "", episode)
         # # if no line, include narration
         # for i in range(len(df)):
         #     if df["Line"].iloc[i]=='':
@@ -90,7 +88,6 @@ def process_episodes(show, seasons=None, S3=True):
         x = []
         for j in list(data["Episode"][data["Season"]==i]):
             if j not in x:
-                episode = re.sub("^season [^ ]* episode [^ ]* ", "", episode)
                 x.append(j)
 
         season_dict.update({str(i): x})
@@ -151,7 +148,7 @@ class JBRank(object):
             doc = doc.lower()
 
             if self.include_title:
-                doc = title.lower()+". "+doc
+                doc = re.sub("^season [^ ]* episode [^ ]* ", "", title.lower()) + ". "+doc
             
             for x in list(cList.keys()):
                 doc = re.sub(x, cList[x], doc)
