@@ -16,12 +16,12 @@
             "take_top": 50,
             "measure": "pagerank",
             "remove_stopwords": true,
-            "term_len_decay": false,
-            "title_multiplier": 3
+            "term_len_decay": true
         },
         "text_summarization":{
             "sentence_similarity_threshold": 0.3,
-            "sentences": 6,
+            "min_num_sentences": 4,
+            "max_num_sentences": 18,
             "order_by_occurence": true,
             "measure": "pagerank"
         },
