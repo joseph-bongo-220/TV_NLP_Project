@@ -41,7 +41,7 @@ def get_pickle_data_frames(show, seasons=None):
     data = aws.get_s3_script_data(show=show, client=s3, path=path, seasons=seasons)
     return data
 
-def process_episodes(show, seasons=None, S3=True):
+def process_episodes(show, seasons=None, S3=True, include_df=True):
     if S3:
         data = get_pickle_data_frames(show=show, seasons=seasons)
 
@@ -77,8 +77,8 @@ def process_episodes(show, seasons=None, S3=True):
         #         print(df["Narration"].iloc[i])
         #         if "HBO" not in df["Narration"].iloc[i]:
         #             df["Line"].iloc[i]=df["Narration"].iloc[i]
-
-        doc = " ".join(list(df["Line"]))
+        lines = [punctuate_line(x) for x in list(df["Line"])]
+        doc = " ".join(lines)
         docs.update({episode: doc})
 
     season_dict = {"All": z}
@@ -91,8 +91,10 @@ def process_episodes(show, seasons=None, S3=True):
                 x.append(j)
 
         season_dict.update({str(i): x})
-
-    return docs, season_dict
+    if include_df:
+        return docs, season_dict, data
+    else:
+        return docs, season_dict
 
 def process_characters(show, seasons=None, num_char=50, S3=True):
     if S3:
@@ -124,9 +126,38 @@ def process_characters(show, seasons=None, num_char=50, S3=True):
     docs={}
     for char in z:
         df = data[data.Character_Name == char]
-        char_text = " ".join(list(df["Line"]))
+        lines = [punctuate_line(x) for x in list(df["Line"])]
+        char_text = " ".join(lines)
         docs.update({char: char_text})
     return docs
+
+def add_ep_speakers(ep_df, ep_summs):
+    cList = get_contractions()
+    cList.update({" g'": " good ",
+        " m'": " my ",
+        " d'": " do ", 
+        " s ": "s ", 
+        "[ ]{2,}": " "})
+    for z in list(cList.keys()):
+        ep_df["N_Lower"] = [re.sub(z, cList[z], y) for y in ep_df["Narration"]]
+    
+    results = []
+    regex_special_chars = ["\)", "\(", "\*", "\+", "\[", "\]", "\^", "\$"]
+    ep_summs2 = ep_summs[:]
+    for i in regex_special_chars:
+        ep_summs2 = [re.sub(i, i, x) for x in ep_summs2]
+    for x in range(len(ep_summs)):
+        temp = list(ep_df["Character_Name"][ep_df["N_Lower"].str.contains(ep_summs2[x])].values)
+        if len(set(temp)) > 2:
+            temp = ", ".join(temp)+": "+ep_summs[x]
+        elif len(set(temp)) == 2:
+            temp = " and ".join(temp)+": "+ep_summs[x]
+        elif len(set(temp)) == 1:
+            temp = temp[0]+": "+ep_summs[x]
+        else:
+            temp = ep_summs[x]
+        results.append(temp) 
+    return results
 
 class JBRank(object):
     """Keyphrase Extraction Algorithm that I wrote based on unsupervised SGRank paper. More info will follow in README"""
@@ -148,7 +179,7 @@ class JBRank(object):
             doc = doc.lower()
 
             if self.include_title:
-                doc = re.sub("^season [^ ]* episode [^ ]* ", "", title.lower()) + ". "+doc
+                doc = re.sub("^season [^ ]* episode [^ ]* ", "", punctuate_line(title.lower())) + doc
             
             for x in list(cList.keys()):
                 doc = re.sub(x, cList[x], doc)
@@ -379,7 +410,7 @@ class JBRank(object):
         self.graph(measure=measure)
 
 class SemanticAlgos(object):
-    def __init__(self, docs, doc_type, sent_threshold = .3, show="Game of thrones"):
+    def __init__(self, docs, doc_type, sent_threshold = .3, show="Game of thrones", clean_sents = False, clean_docs = False):
         if isinstance(docs, dict) == False:
             raise TypeError("Documents must be in the form of a dictionary")
         
@@ -396,6 +427,8 @@ class SemanticAlgos(object):
         self.s3 = boto3.client("s3")
         self.bucket_name = config["aws"]["s3_bucket_name"]
         self.dynamo = boto3.resource('dynamodb')
+        self.clean_sents = clean_sents
+        self.clean_docs = clean_docs
 
         self.embed = SemanticAlgos.load_TF_Universal_Sentence_Encoder()
 
@@ -428,8 +461,8 @@ class SemanticAlgos(object):
 
     @staticmethod
     def tokenize_sentences(doc):
-        separators="[\.|?|!|\n]"
-        return [x.strip() for x in re.split(separators, doc) if x != ""]
+        separators="[\.|?|!|\n|…]"
+        return [x.strip() for x in re.split(separators, doc) if x.strip() != ""]
 
     @staticmethod
     def sentence_length_multiplier(sentence, threshold = 6):
@@ -450,35 +483,55 @@ class SemanticAlgos(object):
         if s3_path is None:
             s3_path=path
 
-        try:
-            obj = self.s3.get_object(Bucket=self.bucket_name, Key=s3_path)
-            self.sentence_embeddings = pickle.loads(obj['Body'].read())
-        except ClientError as ex:
-            if ex.response["Error"]["Code"] == 'NoSuchKey':
-                i=1
-                with tf.Session() as session:
-                    session.run([tf.global_variables_initializer(), tf.tables_initializer()])
-                    for title, doc in self.cleaned_docs.items():
-                        self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
-                        if title not in list(self.sentence_embeddings.keys()):
-                            print("Gathering Tensorflow Embedding")
-                            sents = SemanticAlgos.tokenize_sentences(doc)
-                            sent_embeddings = session.run(self.embed(sents))
-                            sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
-                            self.sentence_embeddings.update({title: sents_dict})
-                            print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
-                            i = i+1
-                with open(path, 'wb') as handle:
-                    pickle.dump(self.sentence_embeddings, handle)
-                self.s3.upload_file(path, self.bucket_name, s3_path)
-                os.remove(path)
-            else:
-                raise ex
+        if self.clean_sents:
+            i=1
+            with tf.Session() as session:
+                session.run([tf.global_variables_initializer(), tf.tables_initializer()])
+                for title, doc in self.cleaned_docs.items():
+                    self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
+                    if title not in list(self.sentence_embeddings.keys()):
+                        print("Gathering Tensorflow Embedding")
+                        sents = SemanticAlgos.tokenize_sentences(doc)
+                        sent_embeddings = session.run(self.embed(sents))
+                        sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
+                        self.sentence_embeddings.update({title: sents_dict})
+                        print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
+                        i = i+1
+            with open(path, 'wb') as handle:
+                pickle.dump(self.sentence_embeddings, handle)
+            self.s3.upload_file(path, self.bucket_name, s3_path)
+            os.remove(path)
+        else:
+            try:
+                obj = self.s3.get_object(Bucket=self.bucket_name, Key=s3_path)
+                self.sentence_embeddings = pickle.loads(obj['Body'].read())
+            except ClientError as ex:
+                if ex.response["Error"]["Code"] == 'NoSuchKey':
+                    i=1
+                    with tf.Session() as session:
+                        session.run([tf.global_variables_initializer(), tf.tables_initializer()])
+                        for title, doc in self.cleaned_docs.items():
+                            self.tokenized_sents.append(SemanticAlgos.tokenize_sentences(doc))
+                            if title not in list(self.sentence_embeddings.keys()):
+                                print("Gathering Tensorflow Embedding")
+                                sents = SemanticAlgos.tokenize_sentences(doc)
+                                sent_embeddings = session.run(self.embed(sents))
+                                sents_dict = {sents[i]:sent_embeddings[i] for i in range(len(sents))}
+                                self.sentence_embeddings.update({title: sents_dict})
+                                print("Done. You should pickle this!\n"+ str(i) +"/"+str(len(self.cleaned_docs)))
+                                i = i+1
+                    with open(path, 'wb') as handle:
+                        pickle.dump(self.sentence_embeddings, handle)
+                    self.s3.upload_file(path, self.bucket_name, s3_path)
+                    os.remove(path)
+                else:
+                    raise ex
 
     def get_doc_embeddings(self):
-        self.doc_embeddings=aws.get_dynamo_data(item=config[self.show]["embeddings"][self.doc_type]["doc_data_name"], table=config["aws"]["Dynamo_Table"], resource=self.dynamo, embedding=True)
+        self.doc_embeddings=aws.get_dynamo_data(item=config[self.show]["embeddings"][self.doc_type]["doc_data_name"], 
+        table=config["aws"]["Dynamo_Table"], resource=self.dynamo, embedding=True)
 
-        if self.doc_embeddings=="No Response":
+        if self.doc_embeddings=="No Response" or self.clean_docs:
             print("Generating New Document Embeddings")
             self.doc_embeddings={}
             i=1
@@ -503,7 +556,7 @@ class SemanticAlgos(object):
         item = config[self.show]["text_summ_name"][self.doc_type]
         results = aws.get_dynamo_data(item=item, table=config["aws"]["Dynamo_Table"], resource=self.dynamo)
         # print(results)
-        if results == "No Response":
+        if results == "No Response" or self.clean_sents:
             partition_key = config["aws"]["partition_key"]
             results = {partition_key:item}
             self.get_sentence_embeddings()
@@ -549,7 +602,6 @@ class SemanticAlgos(object):
                 dists = 1-pairwise_distances(embed_list, metric="cosine")[0]
                 sim_dict = dict(zip(range(min_sents, max_sents+1), dists[1:len(dists)]))
                 loss = [SemanticAlgos.get_loss(key, val) for key, val in sim_dict.items()]
-                print(loss)
                 n = list(sim_dict.keys())[loss.index(min(loss))]
                 if isinstance(n, list):
                     n = n[0]
@@ -587,6 +639,11 @@ class SemanticAlgos(object):
 if __name__ == "__main__":
     show = "Game of thrones"
     pick = config["app"]["use_s3"]
-    episodes, season_dict = process_episodes(show, S3=pick)
+    episodes, season_dict, data = process_episodes(show, S3=pick)
     ep_algs = SemanticAlgos(episodes, doc_type="episodes", sent_threshold=config["app"]["text_summarization"]["sentence_similarity_threshold"], show=show)
-    ep_algs.graph_text_summarization()
+    summs = ep_algs.graph_text_summarization()
+    for key, val in summs.items():
+        df = data[data.Episode == key][["Character_Name", "Narration"]]
+        new_val = add_ep_speakers(df, val)
+        summs[key] = new_val
+    print(summs)

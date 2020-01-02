@@ -10,8 +10,7 @@ import json
 
 config = get_config()
 
-def get_NLP_results():
-    shows = [x for x in config.keys() if x not in ['app', "aws"]]
+def get_NLP_results(shows = [x for x in config.keys() if x not in ['app', "aws"]]):
     result_dict = {}
     for show in shows:
         print(show)
@@ -21,7 +20,7 @@ def get_NLP_results():
             decay=False
         show_dict={}
         pick = config["app"]["use_s3"]
-        episodes, season_dict = NLP.process_episodes(show, S3=pick)
+        episodes, season_dict, data = NLP.process_episodes(show, S3=pick)
         print("episodes processed")
         show_dict.update({"seasons": season_dict})
         ngrams = config["app"]["JBRank"]["ngrams"]
@@ -42,13 +41,19 @@ def get_NLP_results():
         print("JBRank time " + str(end-start))
         show_dict.update({"character_keyphrases": char_rank.final_rankings})
 
-        ep_algs = SemanticAlgos(episodes, doc_type="episodes", sent_threshold=config["app"]["text_summarization"]["sentence_similarity_threshold"], show=show)
+        ep_algs = SemanticAlgos(episodes, doc_type="episodes", sent_threshold=config["app"]["text_summarization"]["sentence_similarity_threshold"],
+         show=show, clean_sents = config["app"]["clean_sents"], clean_docs = config["app"]["clean_docs"])
         start = time.time()
         show_dict.update({"episode_text_similarity": ep_algs.text_similarity()})
         end = time.time()
         print("Text similarity time " + str(end-start))
         start = time.time()
-        show_dict.update({"episode_text_summarization": ep_algs.graph_text_summarization()})
+        summs = ep_algs.graph_text_summarization()
+        for key, val in summs.items():
+            df = data[data.Episode == key][["Character_Name", "Narration"]]
+            new_val = NLP.add_ep_speakers(df, val)
+            summs[key] = new_val
+        show_dict.update({"episode_text_summarization": summs})
         end = time.time()
         print("Text summarization time " + str(end-start))
 
@@ -61,6 +66,6 @@ def get_NLP_results():
 
 if __name__ == '__main__':
     start = time.time()
-    res = get_NLP_results()
+    res = get_NLP_results(shows = ["The office us"])
     end = time.time()
     print("Total time " + str(end-start))
