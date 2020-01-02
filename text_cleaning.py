@@ -41,6 +41,13 @@ def replace_numbers(words):
             new_words.append(word)
     return new_words
 
+def punctuate_line(line):
+    """add punctuation to end of lines when it is not there"""
+    if bool(re.search(r'[\.|?|\!|…]$', line)):
+        return line
+    else:
+        return line + "."
+
 def get_contractions():
     cList = { 
         "’": "'",

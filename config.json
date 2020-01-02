@@ -9,6 +9,8 @@
         "min_fuzzy_matching_ratio": 90,
         "min_partial_fuzzy_matching_ratio": 100,
         "DAN_sentence_encoder_url": "https://tfhub.dev/google/universal-sentence-encoder/2",
+        "clean_sents": false,
+        "clean_docs": false,
         "JBRank":{
             "ngrams": [1,2,3],
             "position_cutoff": 5000,
