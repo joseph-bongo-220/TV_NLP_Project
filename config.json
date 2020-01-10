@@ -36,7 +36,11 @@
         "Dynamo_Table": "tv-show-result",
         "partition_key": "-name-",
         "s3_bucket_name": "jb-s3-bucket",
-        "files_to_s3": ["GOT_sentence_embeddings.pkl", "office_sentence_embeddings.pkl", "GOT_Pickle.pkl", "Office_Pickle.pkl"]
+        "files_to_s3": ["GOT_sentence_embeddings.pkl", "office_sentence_embeddings.pkl", "GOT_Pickle.pkl", "Office_Pickle.pkl"],
+        "postgres":{
+            "name": "scriptdb",
+            "port": 5432
+        }
     },
     "Game of thrones":{
         "extension": "Season-{}-scripts",

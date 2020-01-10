@@ -109,13 +109,13 @@ class Genius_TV_Scraper(object):
                     line_counter+=1
 
                 # create pandas dataframe to store name, quote, show, and episode
-                ep_dict = {"Character_Name": names,
-                            "Line": quotes,
-                            "Narration": lines,
-                            "Show": [self.show for s in range(0, len(lines))],
-                            "Episode": [episode.lower() for e in range(0, len(lines))],
-                            "Season": [s for i in range(0, len(lines))],
-                            "URL": [link for l in range(0, len(lines))]}
+                ep_dict = {"character_name": names,
+                            "line": quotes,
+                            "narration": lines,
+                            "show": [self.show for s in range(0, len(lines))],
+                            "episode": [episode.lower() for e in range(0, len(lines))],
+                            "season": [s for i in range(0, len(lines))],
+                            "url": [link for l in range(0, len(lines))]}
 
                 ep_df = pd.DataFrame(data=ep_dict)
 
@@ -144,18 +144,18 @@ def correct_characters(df, show, min_match=config["app"]["min_fuzzy_matching_rat
     for key, value in character_dict.items():
         for name in value:
             if key == "":
-                for i in list(df["Character_Name"].loc[df["Character_Name"]==name].index):
-                    df["Narration"][i]=df["Line"][i]
-                    df["Line"][i] = ""
-            df["Character_Name"].loc[df["Character_Name"]==name]=key
+                for i in list(df["character_name"].loc[df["character_name"]==name].index):
+                    df["narration"][i]=df["line"][i]
+                    df["line"][i] = ""
+            df["character_name"].loc[df["character_name"]==name]=key
     
     char_list = [x for x in character_dict.keys() if x !=""]
     min_fuzz = config["app"]["min_fuzzy_matching_ratio"]
     min_partial_fuzz = config["app"]["min_partial_fuzzy_matching_ratio"]
     for char_name in char_list:
-        for name in list({x for x in df["Character_Name"] if x!="" and x not in list(character_dict.keys())}):
+        for name in list({x for x in df["character_name"] if x!="" and x not in list(character_dict.keys())}):
             if fuzz.ratio(char_name, name) >= min_fuzz:
-                df["Character_Name"].loc[df["Character_Name"]==name]=char_name
+                df["character_name"].loc[df["character_name"]==name]=char_name
             elif fuzz.partial_ratio(char_name+" ", name) >= min_partial_fuzz or fuzz.partial_ratio(" "+char_name, name) >= min_partial_fuzz:
-                df["Character_Name"].loc[df["Character_Name"]==name]=char_name
+                df["character_name"].loc[df["character_name"]==name]=char_name
     return df
