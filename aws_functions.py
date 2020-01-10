@@ -9,6 +9,8 @@ from decimal import Decimal
 import pandas as pd
 import json
 from Scraper import Genius_TV_Scraper
+import psycopg2
+import NLP
 
 config = get_config()
 
@@ -53,24 +55,40 @@ def bulk_push_to_dynamo():
 
         dynamo_table.put_item(Item=data)
 
-def get_s3_script_data(show, client, path, bucket_name = config["aws"]["s3_bucket_name"], s3_path=None, seasons = None):
-    if s3_path is None:
-        s3_path=path
+def get_script_data(show, connection, cols = ["*"], bucket_name = config["aws"]["s3_bucket_name"], s3_path=None, seasons = None):
+    if seasons is None:
+        query = "SELECT {cols} FROM {show}".format(show = re.sub(" ", "_", show).lower(), cols = ", ".join(cols))   
+    else:
+        seasons = ["'" + str(i) + "'" for i in seasons]
+        query = """SELECT {cols} FROM {show}
+            WHERE season in {season}""".format(show = re.sub(" ", "_", show).lower(), season = "(" + ", ".join(seasons) + ")", cols = ", ".join(cols))
 
     try:
-        obj = client.get_object(Bucket=bucket_name, Key=s3_path)
-        data = pickle.loads(obj['Body'].read())
+        print(query)
+        data = pd.read_sql(query, connection)
+        print("Data Gathered from PostgreSQL Database")
 
-    except ClientError as ex:
-        if ex.response["Error"]["Code"] == 'NoSuchKey':
-            print("Gathering Data from Genius.com")
-            Scraper = Genius_TV_Scraper(show=show, seasons=seasons)
-            data = Scraper.get_scripts()
-            data.to_pickle(path)
-            s3.upload_file(path, bucket_name, s3_path)
-            print("Uploaded "+ path + " to " + s3_path + " in s3 succefully!")
-        else:
-            raise ex
+    except pd.io.sql.DatabaseError:
+        path = config[show]["pickle_path"]
+
+        if s3_path is None:
+            s3_path=path    
+        
+        client = boto3.client("s3")
+
+        try:
+            obj = client.get_object(Bucket=bucket_name, Key=s3_path)
+            data = pickle.loads(obj['Body'].read())
+            put_show_rds(data, show, connection = connection)
+
+        except ClientError as ex:
+            if ex.response["Error"]["Code"] == 'NoSuchKey':
+                print("Gathering Data from Genius.com")
+                Scraper = Genius_TV_Scraper(show=show, seasons=seasons)
+                data = Scraper.get_scripts()
+                put_show_rds(data, show, connection = connection)
+            else:
+                raise ex
     return data
 
 def get_dynamo_data(item, table, resource, partition_key=config["aws"]["partition_key"], embedding=False):
@@ -86,8 +104,88 @@ def get_dynamo_data(item, table, resource, partition_key=config["aws"]["partitio
     except KeyError as ex:
         data = "No Response"
 
-    return data    
+    return data  
+
+def pkls_to_rds(shows = config["app"]["shows"]):
+    """dumps the show pkl files from S3 into Postgres"""
+    # connect to postgres db
+    connection = connect_to_rds(username = os.environ["RDS_USERNAME"], password = os.environ["RDS_PASSWORD"])
+
+    # iterate over each show
+    for show in shows:
+        # get dataframe from S3
+        data = NLP.get_pickle_data_frames(show)
+        put_show_rds(data, show, connection)
+
+def put_show_rds(data, show, connection = None, new = False):
+    if connection is None:
+        connection = connect_to_rds(username = os.environ["RDS_USERNAME"], password = os.environ["RDS_PASSWORD"])
+
+    cursor = connection.cursor()
+
+    # remove non ASCII characters
+    data["narration"] = [re.sub("’", "'", x) for x in data["narration"]]
+    data["narration"] = [re.sub("\t", " ", x) for x in data["narration"]]
+    
+    # create csv path write csv file to local machine
+    csv_path = re.sub(" ", "_", show).lower()+".csv"
+    data.to_csv(csv_path, sep = '\t', index = False)
+    
+    if new:
+        # SQL to create a table for the given show
+        create_sql = """CREATE TABLE {show} (
+            character_name text,
+            line text,
+            narration text,
+            show text,
+            episode text,
+            season integer,
+            url text)""".format(show = re.sub(" ", "_", show).lower())
+
+        # create table
+        cursor.execute(create_sql)
+        connection.commit() 
+
+    # populate table with csv
+    with open(csv_path, 'r', encoding='utf-8') as row:
+        # skip column names
+        next(row)
+        cursor.copy_from(row, re.sub(" ", "_", show).lower(), sep='\t')
+    connection.commit()
+    print(show + " table created. Data populated from " + csv_path + ".")
+
+    # remove csv path from local machine
+    os.remove(csv_path)  
+    print("Removing " + csv_path)
+
+def connect_to_rds(username, password, host = os.environ["RDS_ENDPOINT"], port = config["aws"]["postgres"]["port"], db_name = config["aws"]["postgres"]["name"]):
+    try:
+        connection = psycopg2.connect(
+            host = host,
+            port = port,
+            user = username,
+            password = password,
+            database = db_name)
+        print("Connected to AWS RDS")
+        return connection
+    except:
+        print("""Something has gone wrong. Please verify that your username
+         and password are correct and/or that your account has the proper permissions""")
+
+def delete_table(table_name):
+    connection = connect_to_rds(username = os.environ["RDS_USERNAME"], password = os.environ["RDS_PASSWORD"])
+    cursor = connection.cursor()
+    delete_sql = "DROP TABLE {table} CASCADE;".format(table = table_name)
+    cursor.execute(delete_sql)
+    connection.commit()
+    print(table_name + " Deleted")
 
 if __name__ == '__main__':
-    bulk_push_to_s3()
-    bulk_push_to_dynamo()
+    # delete_table("game_of_thrones")
+    # pkls_to_rds()
+    connection = connect_to_rds(username = os.environ["RDS_USERNAME"], password = os.environ["RDS_PASSWORD"])
+    try:
+        office = pd.read_sql("SELECT * FROM the_office", connection)
+    except pd.io.sql.DatabaseError:
+        print("memes")
+    print(list(office.columns))

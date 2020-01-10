@@ -12,3 +12,4 @@ flask
 sklearn
 scipy
 boto3
+psycopg2
