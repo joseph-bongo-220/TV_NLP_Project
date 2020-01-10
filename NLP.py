@@ -28,110 +28,146 @@ import boto3
 from botocore.exceptions import ClientError, ParamValidationError
 import aws_functions as aws
 from copy import deepcopy
+import psycopg2
 
 import tensorflow as tf 
 import tensorflow_hub as hub
 
+# import config file
 config = get_config()
 
 def get_pickle_data_frames(show, seasons=None):
     """Scrapes Genius scripts and saves them as Pickle files to be accessed later and to be easily called by API."""
-    path = config[show]["pickle_path"]
-    s3 = boto3.client("s3")
-    data = aws.get_s3_script_data(show=show, client=s3, path=path, seasons=seasons)
+    # connect to postgres db
+    connection = aws.connect_to_rds(username = os.environ["RDS_USERNAME"], password = os.environ["RDS_PASSWORD"])
+
+    # load the script data from AWS
+    data = aws.get_script_data(show=show, connection=connection, seasons=seasons)
     return data
 
-def process_episodes(show, seasons=None, S3=True, include_df=True):
-    if S3:
+def process_episodes(show, seasons=None, DB=True):
+    """Takes dataframes containing script information and creates episode documents"""
+    # S3 = True: Data will be pulled from pkl file in S3 bucket (will be changed to Postgres)
+    if DB:
         data = get_pickle_data_frames(show=show, seasons=seasons)
 
+    # S3 = False: Data will be scraped from Genius.com using the Genius_TV_Scraper object 
+    # defined in Scraper.py
     else:
-        path=config[show]["pickle_path"]
-        bucket_name=config["aws"]["s3_bucket_name"]
-        s3_path = path
-
         print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
         #scrape previously specified show and seasons
         data = scraper.get_scripts()
-        data.to_pickle(path)
-        self.s3.upload_file(path, bucket_name, s3_path)
-        os.remove(path)
 
-    #get episodes from data
+        # add data to database
+        aws.put_show_rds(data, show)
+
+    # correct the character names using show character config and 
+    # fuzzy matching and partial fuzzy matching using Levenshtein
+    # distance
     data=correct_characters(data, show)
     
+    # get unique episodes (LOL this is inefficient)
     z = []
-    for i in list(data["Episode"]):
+    for i in list(data["episode"]):
         if i not in z:
             z.append(i)
 
+    # initialize document dictionary
     docs={}
+
+    # iterate over each episode available
     for episode in z:
-        df = data[data.Episode == episode]
+
+        # subset data to only include
+        df = data[data.episode == episode]
+
         # # if no line, include narration
         # for i in range(len(df)):
         #     if df["Line"].iloc[i]=='':
         #         print(df["Narration"].iloc[i])
         #         if "HBO" not in df["Narration"].iloc[i]:
         #             df["Line"].iloc[i]=df["Narration"].iloc[i]
-        lines = [punctuate_line(x) for x in list(df["Line"])]
+
+        # add punctuation to lines when necessary
+        lines = [punctuate_line(x) for x in list(df["line"])]
+
+        # append the lines and update the dict: 
+        # key = episode name
+        # value = document
         doc = " ".join(lines)
         docs.update({episode: doc})
 
+    # create dictionary to store all of the epsodes from a given season
+    # "All" includes all available episodes
     season_dict = {"All": z}
+
+    # seasons defaults to all seasons
     if seasons is None:
         seasons = [i+1 for i in range(config[show]["seasons"])]
+
+    # get each season's episodes
     for i in seasons:
         x = []
-        for j in list(data["Episode"][data["Season"]==i]):
+        for j in list(data["episode"][data["season"]==i]):
             if j not in x:
                 x.append(j)
-
+        # add season to dict
         season_dict.update({str(i): x})
-    if include_df:
-        return docs, season_dict, data
-    else:
-        return docs, season_dict
 
-def process_characters(show, seasons=None, num_char=50, S3=True):
-    if S3:
+    return docs, season_dict
+
+def process_characters(show, seasons=None, num_char=50, DB=True):
+    """Takes dataframes containing script information and creates character documents"""
+    # S3 = True: Data will be pulled from pkl file in S3 bucket (will be changed to Postgres)
+    if DB:
         data = get_pickle_data_frames(show=show, seasons=seasons)
 
-    else:        
-        path=config[show]["pickle_path"]
-        bucket_name=config["aws"]["s3_bucket_name"]
-        s3_path = path
-
+    # S3 = False: Data will be scraped from Genius.com using the Genius_TV_Scraper object 
+    # defined in Scraper.py
+    else:
         print("Gathering Data from Genius.com")
         # initialize scraper for desire show and seasons (default for seasons is all available on Genius)
         scraper = Genius_TV_Scraper(show=show, seasons=seasons)
 
-        #scrape previously specified show and seasons
+        # scrape previously specified show and seasons
         data = scraper.get_scripts()
-        data.to_pickle(path)
-        self.s3.upload_file(path, bucket_name, s3_path)
-        os.remove(path)
+        aws.put_show_rds(data, show)
     
-    #get characters from data
+    # correct the character names using show character config and 
+    # fuzzy matching and partial fuzzy matching using Levenshtein
+    # distance
     data=correct_characters(data, show)
 
+    # remove characters that are not relevant "MAN", etc.
     remove_char=config[show]["remove_chars"]
-    char_list = [x for x in data["Character_Name"] if x not in remove_char]
-    char_counter=Counter(char_list)
+
+    # get top num_char characters by number of lines spoken
+    char_list = [x for x in data["character_name"] if x not in remove_char]
+    char_counter = Counter(char_list)
     z = [x[0] for x in sorted(char_counter.items(), key=lambda x: x[1], reverse=True)][0:num_char]
 
+    # initialize documents dicitionary
     docs={}
     for char in z:
-        df = data[data.Character_Name == char]
-        lines = [punctuate_line(x) for x in list(df["Line"])]
+        # only use data from a given characters
+        df = data[data.character_name == char]
+
+        # get characters lines
+        lines = [punctuate_line(x) for x in list(df["line"])]
+
+        # create documentof character dialogue and update dictionary
+        # key: Character Name
+        # value: All Character Dialogue
         char_text = " ".join(lines)
         docs.update({char: char_text})
     return docs
 
 def add_ep_speakers(ep_df, ep_summs):
+    """adds sentence speaker to text summarizations"""
+    # create column N_Lower to assure text matches sentences
     cList = get_contractions()
     cList.update({" g'": " good ",
         " m'": " my ",
@@ -139,15 +175,28 @@ def add_ep_speakers(ep_df, ep_summs):
         " s ": "s ", 
         "[ ]{2,}": " "})
     for z in list(cList.keys()):
-        ep_df["N_Lower"] = [re.sub(z, cList[z], y) for y in ep_df["Narration"]]
+        ep_df["n_lower"] = [re.sub(z, cList[z], y) for y in ep_df["narration"]]
     
+    # initialize result list
     results = []
+
+    # list regex special charaters that need replacement
     regex_special_chars = ["\)", "\(", "\*", "\+", "\[", "\]", "\^", "\$"]
+
+    # copy list of summary sentences
     ep_summs2 = ep_summs[:]
+
+    # turn copy of list into valid regular expressions
     for i in regex_special_chars:
         ep_summs2 = [re.sub(i, i, x) for x in ep_summs2]
+
+    # iterate over summary sentence indices
     for x in range(len(ep_summs)):
-        temp = list(ep_df["Character_Name"][ep_df["N_Lower"].str.contains(ep_summs2[x])].values)
+        # get the character name for the corresponding sentences
+        temp = list(ep_df["character_name"][ep_df["n_lower"].str.contains(ep_summs2[x])].values)
+        
+        # TEMPORARY WORK AROUND
+        # Add speaker(s) to original summary sentences
         if len(set(temp)) > 2:
             temp = ", ".join(temp)+": "+ep_summs[x]
         elif len(set(temp)) == 2:
@@ -162,25 +211,37 @@ def add_ep_speakers(ep_df, ep_summs):
 class JBRank(object):
     """Keyphrase Extraction Algorithm that I wrote based on unsupervised SGRank paper. More info will follow in README"""
     def __init__(self, docs, include_title=False, term_len_decay=True, ngrams=[1,2,3,4,5,6], position_cutoff=5000, graph_cutoff=500, take_top=50, show="Game of thrones", correct_subsum=False):
+        """Parses provided documents and gathers the TF-IDF for each word for each document."""
+        # confirm documents are in the proper format
+        # Raise Error otherwise
         if isinstance(docs, dict) == False:
             raise TypeError("Documents must be in the form of a dictionary")
         
+        # get contractions to be replaced
         cList = get_contractions()
+
+        # initialize several attributes of objects
         self.TF_list=[]
         self.tokenized_docs=[]
         self.doc_titles=[]
         self.include_title = include_title
         self.term_len_decay = term_len_decay
     
+        # iterate over the documents
         for key, value in docs.items():
+            # save title
             title = key
             self.doc_titles.append(title)
+
+            # coerce document to all lowercase
             doc = value
             doc = doc.lower()
 
+            # add title to document
             if self.include_title:
                 doc = re.sub("^season [^ ]* episode [^ ]* ", "", punctuate_line(title.lower())) + doc
             
+            # Replace contractions
             for x in list(cList.keys()):
                 doc = re.sub(x, cList[x], doc)
             
@@ -194,146 +255,233 @@ class JBRank(object):
             # Tokenize document
             word_list = word_tokenize(doc)
 
-            # Clean Text
+            # Remove non-ASCII characters from list of tokenized words
             word_list = clean_text(word_list)
             
             # Replace numbers with numerical representation
             word_list = replace_numbers(word_list)
             
+            # save tokenized document
             self.tokenized_docs.append(word_list)
+
+            # remove stopwords andwords of 2 for fewer characters
             word_list_2 = remove_stopwords(word_list)
             word_list_2 = remove_x_chars_or_less(word_list_2, 2)
+
+            # get term frequency (TF)
             BOW = self.get_BOW_TF(word_list_2)
             
+            # get desired n_grams
             self.grams=[x for x in ngrams if x >=2 and x<=6]
             
             for size in self.grams:
+                # get all ngrames of length = size
                 tokenized_ngrams = ["_".join(word_list[x:x+size]) for x in range(len(word_list)) if len(word_list[x:x+size])== size]
+
+                # remove stopwords ad correct possesive "'s" if necessary
                 if config["app"]["JBRank"]["remove_stopwords"]:
                     tokenized_ngrams = remove_stopwords(tokenized_ngrams)
                     tokenized_ngrams = correct_possesives(tokenized_ngrams)
+                
+                # get term frequency for n grams and update original ngrams
                 NBOW = self.get_BOW_TF(tokenized_ngrams)
                 BOW.update(NBOW)
             
+            # append this to one large Term Frequency list
             self.TF_list.append(BOW)
             
+            # correct for words subsumed by ngrams
             if correct_subsum:
                 self.TF_list=self.subsum_correction(TF_list)
-            
+        
+        # get inverse document frequency such that idf(w) = log(total_#_of_docs / #_of_docs_with_word_'w')
         IDF_list = self.get_BOW_IDF(self.TF_list)
         
+        # get tf-idf for each word, for each document
         self.tf_idf_list = self.get_TFIDF_info(tf_dicts=self.TF_list, idf_dict=IDF_list)
         
+        # initialize more parameters
         self.position_cutoff=position_cutoff
         self.graph_cutoff=graph_cutoff
         self.take_top=take_top
 
     @staticmethod
     def title_stat_weight(w,t):
-        """function for getting the title multiplier that is greater than 1 for all natural numbers, monotonically increasing, and has a double dervaitve <0 (decaying)"""
+        """function for getting the title multiplier that is greater than 1 for all natural numbers, 
+        monotonically increasing, and has a double dervaitve < 0 (decaying)"""
         return (w/t)*np.log(w+1)+1
         
     def stats(self):
+        """further weight tf-idf by addition metrics (position of first occurrence, 
+        term length, whether the word/ngram was in the title, etc)"""
+
+        # initialize dictionary for position of first occurence factor
         PFO_factor={}
+
+        # initialize dictionary for term length factor
         tl_factor={}
+
         for doc in self.tokenized_docs:
+            # get the position of first occurence and term length for each term in the given document
             PFO_factor.update(self.get_PFO(doc, self.position_cutoff))
             tl_factor.update(self.get_TL(doc))
+
             for size in self.grams:
+                # get ngrams andcorrect possesives
                 tokenized_ngrams = ["_".join(doc[x:x+size]) for x in range(len(doc)) if len(doc[x:x+size])== size]
                 tokenized_ngrams = correct_possesives(tokenized_ngrams)
+
+                # get position of first occurrence and term length of each word in each document
                 PFO_factor.update(self.get_PFO(tokenized_ngrams, self.position_cutoff))
                 tl_factor.update(self.get_TL(tokenized_ngrams))
-                
+
+        # copy TF-IDF list   
         self.stat_ranking= self.tf_idf_list.copy()
         
         for i in range(len(self.stat_ranking)):
             if self.include_title:
+                # tokenize document titles to get keyphrases from title
                 title = self.doc_titles[i]
                 title_words = word_tokenize(title)
 
+                # get the ngrams from the title
                 title_ngrams=[]
                 sizes = [x for x in self.grams if x >=2 and x<=len(title_words)]
                 for size in sizes:
                     title_ngrams = title_ngrams + ["_".join(title_words[x:x+size]) for x in range(len(title_words)) if len(title_words[x:x+size])== size]
 
+                # append the title ngrams to the list of total ngrams
                 title_terms = title_words+title_ngrams
 
             for key, val in self.stat_ranking[i].items():
+                # mulitply TD-IDF score by position of first occurence factor and term length factor
                 self.stat_ranking[i][key]=val*PFO_factor[key]*tl_factor[key]
                 if self.include_title:
                     if key in title_terms:
+                        # multiply title by decaying term > 1
                         self.stat_ranking[i][key]=self.stat_ranking[i][key]*JBRank.title_stat_weight(len(re.findall("_", key)), len(title_words))
+
+            # rerank keyphrase scores 
             self.stat_ranking[i] = sort_dict(self.stat_ranking[i])[:self.take_top]
             self.stat_ranking[i] = {key:value for key,value in self.stat_ranking[i]}
             
     def graph(self, measure="pagerank"):
+        """take top phrases and reranking with score from graphical relationship of distance to other keyphrases"""
+        # initial final ranking
         self.final_rankings = {}
-        for i in range(len(self.stat_ranking)):        
+
+        # iterate over statistical rankings
+        for i in range(len(self.stat_ranking)):    
+            # get corresponding statistical ranking, tokenized document, and keyphrases    
             ranking = self.stat_ranking[i]
             doc = self.tokenized_docs[i]
             words = list(ranking.keys())
+
+            # initialize networkx graph with nodes named after each keyphrase
             G=nx.Graph()
             G.add_nodes_from(words)
             
-            #get edges of graphs
+            # get edges of graphs
+            # initialize dictionary to get indices of a give keyphrase
             indices_dict={}
             for word in words:
                 indices_dict.update({word:self.get_inds_for_gram(word, doc)})
-
+            
+            # get the edge weights table
             weights_df=self.get_edge_weights(indices_dict, self.graph_cutoff)
             for word1 in words:
                 for word2 in words:
+                    # if the weight between two keyphrases is 0 or nan, do nothing
                     if weights_df[word1][word2]==0 or math.isnan(weights_df[word1][word2]):
                         pass
+                    
+                    # if there is a weight for the two phrases add is to the (undirected graph) and multiply it 
+                    # by the ranking stat/tf-idf ranking for each phrase
                     else:
                         G.add_edge(word1, word2, weight=weights_df[word1][word2]*ranking[word1]*ranking[word2])
+
             if measure == "pagerank":
+                # use pagerank as graph metric of importance (this is what we will use by default)
+                # PageRank = 
                 gr_dict=nx.pagerank(G)
             elif measure == "betweenness centrality":
+                # use betweenness centrality as graph metric of importance
+                # betweenness centrality = 
                 gr_dict=nx.betweenness_centrality(G, weight="weight")
             elif measure == "load centrality":
+                # use betweenness centrality as graph metric of importance
+                # load centrality = 
                 gr_dict=nx.load_centrality(G, weight="weight")
+            
+            # order the final rankings and export them
             gr_dict_sorted=sort_dict(gr_dict)
             self.final_rankings.update({self.doc_titles[i]: {key:value for key,value in gr_dict_sorted}})
 
     def get_inds_for_gram(self, word, tokenized_doc):
-        split_=word.split("_")
+        """recover indices for each word and ngram"""
+        # split a keyphrase into each individual word
+        split_= word.split("_")
         grams=[]
+
+        # append the indices of the given word of the ngram into a list of lists
         for wordy in split_:
             grams.append([i for i,e in enumerate(tokenized_doc) if re.search(wordy, tokenized_doc[i]) is not None])
 
         inds=[]
+        # iterate over indices of first word in a given ngram
         for j in grams[0]:
+            # store these indices in a list
             temp = [j]
+            
+            # iterate over all other lists of indices
             for i in range(len(grams)-1):
+                # if the next word is found append the index add index and proceed to next word
+                # else do not append anything
                 if j+i+1 in grams[i+1]:
                     temp.append(j+i+1)
+            # temp and grams are the same length, this means the word was found and we can add the index
             if len(temp)==len(grams):
                 inds.append(temp)
         return inds
     
     def get_edge_weights(self, wi_dict, cutoff):
+        """Use the distance between two keyphrases to get the edge weight"""
+        # create data table with of the words in table to stor edge weights
+        # Important: Dictionary is initialized with vaalues of nan
         edge_df=pd.DataFrame(index=list(wi_dict.keys()), columns=list(wi_dict.keys()))
+
+        # iterate over word combinations and respective indices
         for word, indices in wi_dict.items():
             for word2, indices2 in wi_dict.items():
+                # initialize distances
                 dists = []
+
+                # Do not append anything if this observation of the transpose of the matrix is
+                # already filled in or the words are the same (same words implies diagonal observations)
                 if math.isnan(edge_df[word2][word])==False or word==word2:
                     pass 
                 else:
+                    # get the length of each word (does not seem like this is used)
                     len_word=len(re.findall("_",word))
                     len_word2=len(re.findall("_",word2))
+
                     ngram_factor = max([len([x for x in word.split("_") if x not in word2.split("_")]), len([x for x in word2.split("_") if x not in word.split("_")])])
                     for x in wi_dict[word]:
                         dists.extend([smallest_distance(x,y)+ngram_factor for y in wi_dict[word2] if smallest_distance(x,y) < cutoff and smallest_distance(x,y)!=0])
                     num=0
                     if len(dists)==0:
+                        # if the terms are not within 'cutoff' positions of each other, the weights
+                        # will be 0
                         edge_df[word][word2]=0
                         edge_df[word2][word]=0
                     else:
+                        # terms within the cutoff distance of each other will be given the 
+                        # weight = log(cutoff/distance)
                         for dist in dists:
                             num=num+np.log(cutoff/dist)
                         edge_df[word][word2]=num/len(dists)
+
+                        # populate other corresponding observation with 0 
                         edge_df[word2][word]=0
         return edge_df
 
@@ -344,26 +492,39 @@ class JBRank(object):
 
     def get_BOW_IDF(self, list_of_bows):
         """returns a dictionary with the inverse document frequency of all terms in a given corpus"""
+        # get list of bag of words term frequencies
         temp = []
         for i in list_of_bows:
             temp.append(i.keys())
         
+        # flatten this list of lists
         term_list = flatten(temp)
         
+        # initialize an inverse document frequency dictionary
+        # currently, this represents the number of documents in which the term occurs
         idf_list=dict(Counter(term_list))
         
         for key, val in idf_list.items():
+            # if the term is a single word or bigram, take the log of the number of documents
+            # divided by the number of documents in which the document o
             if len(re.findall("_", key))<2:
                 idf_list[key] = np.log(len(list_of_bows)/val)
                 
+            # if the term is a 3-gram or greater, we assume it is unique to a given document
+            # (mostly for the purposes of computational efficiency)
+            # This differs from SGRank as SGRank considers all ngrams of n > 1 to be unique
             else:
                 idf_list[key] = np.log(len(list_of_bows))
         
         return idf_list
 
     def get_TFIDF_info(self, tf_dicts, idf_dict):
-        """takes in the term frequency dictionaries and IDF dictionary anc calculates TFIDF for every term in the corpus"""
+        """takes in the term frequency dictionaries and IDF dictionary and calculates TFIDF for every term in the corpus"""
+        # initialize the output dicitionary by copying the tf dict
         tf_idf_dict = tf_dicts.copy()
+
+        # mulitply the term frequency for a given phrase in a given
+        # document by the inverse document frequency of that phrase
         for i in range(0,len(tf_idf_dict)):
             for key, val in tf_idf_dict[i].items():
                 tf_idf_dict[i][key] = tf_idf_dict[i][key]*idf_dict[key]
@@ -371,41 +532,74 @@ class JBRank(object):
     
     def get_PFO(self, tokenized_doc, cutoff_position):
         """Get the position of first occurance for a given word in a document"""
+        # initialize output dictionary and possible indices
         PFO_dict={}
+        nums = [j for j in range(1,len(tokenized_doc)+1)]
+
         for i in range(1,len(tokenized_doc)+1):
-            nums = [i for i in range(1,len(tokenized_doc)+1)]
+            # select i-th word from the back of the document
             word = tokenized_doc[-i]
-            if word in PFO_dict==True:
+
+            # if this word is in the dictionary, replace it with the current index (lower value)
+            if word in PFO_dict:
                 PFO_dict[word]=nums[-i]
+
+            # else, add the word to the dictionary (with the current index)
             else:
                 PFO_dict.update({word:nums[-i]})
         
+        # apply the position of first occurence weighting
         for key, val in PFO_dict.items():
             PFO_dict[key] = np.log(500+(cutoff_position/val)) 
         return PFO_dict
 
     def get_TL(self, tokenized_doc):
+        """returns the term lenght factor for a given term"""
+        # whether or not you would like the term length factor to decay
+        # I do want it to decay, SGRank does not do this
         decay=self.term_len_decay
+
+        # initialize output dictionary
         tl_dict={}
         for word in tokenized_doc:
+            # if decay, multiply by log of term length
             if decay:
                 tl_dict.update({word:np.log(len(re.findall("_", word))+2)})
+            # if not decay, multiply by term length
             else:
                 tl_dict.update({word:len(re.findall("_", word))+1})
-            
         return tl_dict
 
     def subsum_correction(self, tf_dict_list):
+        """correct the term frequency for subsumed terms
+        i.e. if two keyphrases are 'jumbo shrimp' and 'jumbo', then this would
+        correct the count of 'jumbo' to not double count the word 'jumbo'
+        that occurs in 'jumbo shrimp'"""
+
+        # iterate over list of term frequency dictionaries
         for tf_dict in tf_dict_list:
+            # iterate over given term frequency dictionary
             for key, val in tf_dict.items():
+                # if the given term is an ngram with n>1
                 if len(key.split(sep="_")) >= 2:
+                    # subtract the phrase valuefrom the word if applicable
                     for word in key.split(sep="_"):
-                        tf_dict[word]=tf_dict[word]-tf_dict[key]
+                        try:
+                            tf_dict[word]=tf_dict[word]-tf_dict[key]
+                        # if not pplicable then we do nothing
+                        except KeyError:
+                            pass
                     
         return tf_dict_list
 
     def run(self):
+        """This is the method that the user will have to call to run the model. The TF-IDF portion is done in intitialization,
+        while the statistical weighting and graphical weighting are done by the methods stats() and graph() respectively."""
+
+        # statistical weighting
         self.stats()
+
+        # select graph metric used for phrase importance and run final graphical weighting
         measure = config["app"]["JBRank"]["measure"]
         self.graph(measure=measure)
 
@@ -455,26 +649,33 @@ class SemanticAlgos(object):
 
     @staticmethod
     def load_TF_Universal_Sentence_Encoder():
+        """Load the TensorFlow Universal sentence encoder from internet or locally"""
         print("Loading TensorFlow Universal Sentence Encoder")
         embed = hub.Module(config["app"]["DAN_sentence_encoder_url"])
         return embed
 
     @staticmethod
     def tokenize_sentences(doc):
+        """"tokenizes the sentences of a given document"""
         separators="[\.|?|!|\n|…]"
         return [x.strip() for x in re.split(separators, doc) if x.strip() != ""]
 
     @staticmethod
     def sentence_length_multiplier(sentence, threshold = 6):
+        """Get sentence length and return our sentence weight"""
         len_sent = len(re.findall("\w \w", sentence))+1
+
+        # If the weight is below the threshold, return nothing
         if len_sent < threshold:
             return 0
+        # Else, return the sentence length multiplier
         else:
             return np.log(((len_sent-threshold)/2)+1)+1
 
     @staticmethod
     def get_loss(n, sim, param = .001):
-        """We are looking to minimize the loss function inspired by LASSO. Penalizing L2 norm"""
+        """We are looking to minimize the loss function inspired by how LASSO penalizes L2 norm.
+        Loss = (1-(cosine similarity between summary and document embeddings))^2 + penalization parameter(# of sentences)"""
         return ((1-sim)**2) + param*(n)
 
     def get_sentence_embeddings(self, s3_path=None):
@@ -643,7 +844,7 @@ if __name__ == "__main__":
     ep_algs = SemanticAlgos(episodes, doc_type="episodes", sent_threshold=config["app"]["text_summarization"]["sentence_similarity_threshold"], show=show)
     summs = ep_algs.graph_text_summarization()
     for key, val in summs.items():
-        df = data[data.Episode == key][["Character_Name", "Narration"]]
+        df = data[data.episode == key][["character_name", "narration"]]
         new_val = add_ep_speakers(df, val)
         summs[key] = new_val
     print(summs)

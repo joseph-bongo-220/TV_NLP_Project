@@ -1,16 +1,21 @@
 import NLP
 from NLP import JBRank, SemanticAlgos
+import aws_functions as aws
 import json
+import pandas as pd
 from app_config import get_config
 from Scraper import Genius_TV_Scraper, correct_characters
 import pickle
 from Scraper import correct_characters
 import time
 import json
+import os
+import re
 
 config = get_config()
 
 def get_NLP_results(shows = [x for x in config.keys() if x not in ['app', "aws"]]):
+    connection = aws.connect_to_rds(username = os.environ["RDS_USERNAME"], password = os.environ["RDS_PASSWORD"])
     result_dict = {}
     for show in shows:
         print(show)
@@ -20,7 +25,7 @@ def get_NLP_results(shows = [x for x in config.keys() if x not in ['app', "aws"]
             decay=False
         show_dict={}
         pick = config["app"]["use_s3"]
-        episodes, season_dict, data = NLP.process_episodes(show, S3=pick)
+        episodes, season_dict = NLP.process_episodes(show, DB=pick)
         print("episodes processed")
         show_dict.update({"seasons": season_dict})
         ngrams = config["app"]["JBRank"]["ngrams"]
@@ -32,7 +37,7 @@ def get_NLP_results(shows = [x for x in config.keys() if x not in ['app', "aws"]
         show_dict.update({"episode_keyphrases": ep_rank.final_rankings})
 
         num_char = config[show]["num_characters"]
-        characters=NLP.process_characters(show, num_char=num_char, S3=pick)
+        characters=NLP.process_characters(show, num_char=num_char, DB=pick)
         print("chars processed")
         start = time.time()
         char_rank=JBRank(docs=characters, include_title=False, term_len_decay=decay, ngrams=ngrams)
@@ -49,8 +54,11 @@ def get_NLP_results(shows = [x for x in config.keys() if x not in ['app', "aws"]
         print("Text similarity time " + str(end-start))
         start = time.time()
         summs = ep_algs.graph_text_summarization()
+
         for key, val in summs.items():
-            df = data[data.Episode == key][["Character_Name", "Narration"]]
+            query = """SELECT character_name, narration FROM {show}
+            WHERE episode = {episode}""".format(show = re.sub(" ", "_", show).lower(), episode = "'"+key+"'")
+            df = pd.read_sql(query, connection)
             new_val = NLP.add_ep_speakers(df, val)
             summs[key] = new_val
         show_dict.update({"episode_text_summarization": summs})
